@@ -1463,7 +1463,7 @@ function openFluctuationModal(row) {
   `, () => {
     $("#fluctuationForm").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const data = await api(`/settings/fluctuation/${row.id}`, {
+      const data = await api(`/api/settings/fluctuation/${row.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: $("#fluctuationName").value,
@@ -1497,7 +1497,7 @@ function openDeleteFluctuationModal(row) {
     </div>
   `, () => {
     $("#confirmDeleteFluctuation").addEventListener("click", async () => {
-      const data = await api(`/settings/fluctuation/${row.id}`, { method: "DELETE" });
+      const data = await api(`/api/settings/fluctuation/${row.id}`, { method: "DELETE" });
       state.settings.fluctuation = data.fluctuation || [];
       closeModal();
       renderApp();
@@ -1799,7 +1799,6 @@ function renderLogsPanel() {
 
 function renderFluctuation() {
   const rows = state.settings.fluctuation || [];
-  const canManage = canManageFluctuation();
   const selectedRange = localStorage.getItem("lspd_fluctuation_range") || "Monat";
   const from = rangeStart(selectedRange);
   const rangeRows = rows.filter((row) => !from || new Date(row.createdAt) >= from);
@@ -1840,7 +1839,7 @@ function renderFluctuation() {
       <div class="panel-header"><h3>Mitgliederfluktation</h3><span class="muted">${rangeRows.length} Einträge</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Typ</th><th>Grund</th><th>Datum</th>${canManage ? "<th>Aktionen</th>" : ""}</tr></thead>
+          <thead><tr><th>Name</th><th>Typ</th><th>Grund</th><th>Datum</th></tr></thead>
           <tbody>
             ${rangeRows.length ? rangeRows.map((row) => `
               <tr class="filterable-row">
@@ -1848,9 +1847,8 @@ function renderFluctuation() {
                 <td><span class="fluctuation-chip ${fluctuationTypeClass(row)}">${escapeHtml(row.type)}</span></td>
                 <td>${escapeHtml(row.reason || "-")}</td>
                 <td>${formatDateTime(row.createdAt)}</td>
-                ${canManage ? `<td><span class="button-row"><button class="mini-icon edit-fluctuation" data-id="${escapeHtml(row.id)}" title="Bearbeiten">${actionIcon("edit")}</button><button class="mini-icon danger delete-fluctuation" data-id="${escapeHtml(row.id)}" title="Löschen">${actionIcon("delete")}</button></span></td>` : ""}
               </tr>
-            `).join("") : `<tr><td colspan="${canManage ? 5 : 4}" class="muted">Noch keine Einträge.</td></tr>`}
+            `).join("") : `<tr><td colspan="4" class="muted">Noch keine Einträge.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1860,7 +1858,6 @@ function renderFluctuation() {
     localStorage.setItem("lspd_fluctuation_range", event.target.value);
     renderFluctuation();
   });
-  bindFluctuationActions();
 }
 
 function editableItPages() {

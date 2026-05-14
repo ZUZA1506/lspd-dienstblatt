@@ -102,7 +102,7 @@ function normalizePermissions(value = {}) {
 
 const departmentPositions = ["Direktion", "Leitung", "Stv. Leitung", "Mitglied", "Anwärter"];
 const positionPower = { "Direktion": 5, "Leitung": 4, "Stv. Leitung": 3, "Mitglied": 2, "Anwärter": 1 };
-const trainingNames = ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted", "EL", "Agent Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II", "Air Support", "Riot", "Coquette"];
+const trainingNames = ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted", "EL", "Officer Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II", "Air Support", "Riot", "Coquette"];
 
 function nowIso() {
   return new Date().toISOString();
@@ -159,7 +159,7 @@ function ensureStorage() {
       ranks: defaultRanks(),
       navLabels: {},
       departments: defaultDepartments(),
-      informationText: "Hier können später zentrale Informationen für alle Agents gepflegt werden.",
+      informationText: "Hier können später zentrale Informationen für alle Officer gepflegt werden.",
       applicationStatus: "Offen",
       calendarEvents: [],
       seizures: [],
@@ -202,7 +202,7 @@ function readDb() {
   db.settings.ranks = Array.isArray(db.settings.ranks) && db.settings.ranks.length ? db.settings.ranks : defaultRanks();
   db.settings.navLabels = db.settings.navLabels || {};
   db.settings.departments = normalizeDepartments(db.settings.departments);
-  db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Agents gepflegt werden.";
+  db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Officer gepflegt werden.";
   db.settings.applicationStatus = db.settings.applicationStatus || "Offen";
   if (typeof db.settings.defconText !== "string") db.settings.defconText = "Automatisch / Manuell aktualisierbar";
   db.settings.calendarEvents = Array.isArray(db.settings.calendarEvents) ? db.settings.calendarEvents : [];
@@ -710,6 +710,49 @@ app.get("/api/bootstrap", requireAuth, (req, res) => {
       user: publicUser(req.db.users.find((user) => user.id === entry.userId))
     }))
   });
+});
+
+function requireItLead(req, res, next) {
+  if (req.user?.role !== "IT-Leitung") {
+    return res.status(403).json({ error: "Nur die IT-Leitung darf Mitgliederfluktation bearbeiten." });
+  }
+  next();
+}
+
+app.patch("/api/settings/fluctuation/:id", requireAuth, requireItLead, (req, res) => {
+  const rows = req.db.settings.fluctuation || [];
+  const row = rows.find((item) => item.id === req.params.id);
+  if (!row) return res.status(404).json({ error: "Fluktuationseintrag nicht gefunden." });
+  const before = { ...row };
+  const type = String(req.body.type || row.type || "").trim();
+  if (!["Eingestellt", "Kündigung", "KÃ¼ndigung"].includes(type)) {
+    return res.status(400).json({ error: "Ungültiger Typ." });
+  }
+  const createdAt = req.body.createdAt ? new Date(req.body.createdAt) : new Date(row.createdAt || nowIso());
+  if (Number.isNaN(createdAt.getTime())) return res.status(400).json({ error: "Ungültiges Datum." });
+
+  row.name = String(req.body.name || row.name || "").trim();
+  row.dn = String(req.body.dn ?? row.dn ?? "").trim();
+  row.rank = Number.isInteger(Number(req.body.rank)) ? Number(req.body.rank) : row.rank;
+  row.actorName = String(req.body.actorName ?? row.actorName ?? "").trim();
+  row.type = type === "KÃ¼ndigung" ? "Kündigung" : type;
+  row.reason = String(req.body.reason ?? row.reason ?? "").trim();
+  row.createdAt = createdAt.toISOString();
+  if (!row.name) return res.status(400).json({ error: "Name ist erforderlich." });
+
+  logAction(req.db, req.user, "Fluktuationseintrag bearbeitet", row.name, { before, after: { ...row } });
+  writeDb(req.db);
+  res.json({ fluctuation: req.db.settings.fluctuation });
+});
+
+app.delete("/api/settings/fluctuation/:id", requireAuth, requireItLead, (req, res) => {
+  const rows = req.db.settings.fluctuation || [];
+  const index = rows.findIndex((item) => item.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Fluktuationseintrag nicht gefunden." });
+  const [removed] = rows.splice(index, 1);
+  logAction(req.db, req.user, "Fluktuationseintrag gelöscht", removed.name || removed.id, { removed });
+  writeDb(req.db);
+  res.json({ fluctuation: req.db.settings.fluctuation });
 });
 
 app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {

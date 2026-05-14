@@ -117,7 +117,7 @@ const adminPages = ["IT", "Direktion"];
 const positionOrder = { "Direktion": 5, "Leitung": 4, "Stv. Leitung": 3, "Mitglied": 2, "Anwärter": 1 };
 const trainingGroups = [
   ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted"],
-  ["EL", "Agent Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II"],
+  ["EL", "Officer Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II"],
   ["Air Support", "Riot", "Coquette"]
 ];
 const trainings = trainingGroups.flat();
@@ -161,6 +161,10 @@ const notifyRoot = $("#notifyRoot");
 function hasRole(minRole) {
   const power = { User: 1, Supervisor: 2, Direktion: 3, IT: 4, "IT-Leitung": 5 };
   return (power[state.currentUser?.role] || 0) >= (power[minRole] || 0);
+}
+
+function canManageFluctuation() {
+  return state.currentUser?.role === "IT-Leitung";
 }
 
 function permissionAllows(rule, user = state.currentUser) {
@@ -220,7 +224,7 @@ function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
     return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar">`;
   }
-  return `<div class="avatar ${size} avatar-fallback"><span>LSPD</span></div>`;
+  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-4" alt="LSPD">`;
 }
 
 function rankLabel(rank) {
@@ -499,7 +503,7 @@ function successMessage(path, method) {
   if (path.includes("/login")) return "Erfolgreich angemeldet.";
   if (path.includes("/logout")) return "Erfolgreich abgemeldet.";
   if (path.includes("/duty/start")) return "Dienst gestartet.";
-  if (path.includes("/duty/stop-all")) return "Alle Agents wurden ausgetragen.";
+  if (path.includes("/duty/stop-all")) return "Alle Officer wurden ausgetragen.";
   if (path.includes("/duty/stop")) return "Dienst beendet.";
   if (path.includes("/notes") && method === "POST") return "Notiz erstellt.";
   if (path.includes("/notes") && method === "PATCH") return "Notiz aktualisiert.";
@@ -515,6 +519,8 @@ function successMessage(path, method) {
   if (path.includes("/seizures") && method === "POST") return "Beschlagnahmung eingetragen.";
   if (path.includes("/seizures") && method === "PATCH") return "Beschlagnahmung gespeichert.";
   if (path.includes("/seizures") && method === "DELETE") return "Beschlagnahmung gelöscht.";
+  if (path.includes("/settings/fluctuation") && method === "PATCH") return "Fluktuationseintrag gespeichert.";
+  if (path.includes("/settings/fluctuation") && method === "DELETE") return "Fluktuationseintrag gelöscht.";
   if (path.includes("/suspend")) return "Mitglied suspendiert.";
   if (path.includes("/dismiss")) return "Mitglied entlassen.";
   if (path.includes("/users") && method === "POST") return "Mitglied eingestellt.";
@@ -690,7 +696,7 @@ function renderDienstblatt() {
     </section>
 
     <section class="grid-4 dashboard-stats">
-      <div class="stat-card"><span>Aktive Agents</span><i>${iconSvg("Einsatzzentrale")}</i><strong>${agents}</strong><small>Im Einsatz</small></div>
+      <div class="stat-card"><span>Aktive Officer</span><i>${iconSvg("Einsatzzentrale")}</i><strong>${agents}</strong><small>Im Einsatz</small></div>
       <div class="stat-card"><span>Außendienst</span><i>${iconSvg("Kalender")}</i><strong>${outside}</strong><small>Auf Streife</small></div>
       <div class="stat-card"><span>Undercover Dienst</span><i>${iconSvg("Mitglieder")}</i><strong>${undercover}</strong><small>Zivil Einheit</small></div>
       <div class="stat-card"><span>Innendienst ${adminDuty ? `<em class="admin-duty-count">(${adminDuty})</em>` : ""}</span><i>${iconSvg("Abteilungen")}</i><strong>${inside}</strong><small>Im Büro${adminDuty ? " · Admin Dienst" : ""}</small></div>
@@ -708,7 +714,7 @@ function renderDienstblatt() {
 
     <section class="panel">
       <div class="panel-header">
-        <h3><span class="section-icon">♙</span>Aktive Agents</h3>
+        <h3><span class="section-icon">♙</span>Aktive Officer</h3>
         <div class="button-row">
           ${myDuty ? `<button class="ghost-btn action-btn" id="switchDutyBtn"><span>${iconSvg("Einsatzzentrale")}</span> Umtragen</button>` : ""}
           <button class="blue-btn action-btn" id="startDutyBtn"><span>+</span> Eintragen</button>
@@ -1163,6 +1169,7 @@ function renderDirektion() {
     updateUprankList();
   });
   $("#uprankRulesForm")?.addEventListener("submit", saveUprankRules);
+  bindFluctuationActions();
   setupTableFilter("#logSearch");
   setupTableFilter("#hoursSearch");
   setupTableFilter("#directionFluctuationSearch");
@@ -1378,12 +1385,13 @@ function renderTeamlerControl(user = null) {
 
 function renderDirectionFluctuationPanel() {
   const rows = state.settings.fluctuation || [];
+  const canManage = canManageFluctuation();
   return `
     <div class="panel department-overview-content">
       <div class="panel-header"><h3>Mitgliederfluktation</h3><input id="directionFluctuationSearch" class="compact-input" placeholder="Suchen"></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>DN</th><th>Rang</th><th>Bearbeitet von</th><th>Typ</th><th>Grund</th><th>Datum</th></tr></thead>
+          <thead><tr><th>Name</th><th>DN</th><th>Rang</th><th>Bearbeitet von</th><th>Typ</th><th>Grund</th><th>Datum</th>${canManage ? "<th>Aktionen</th>" : ""}</tr></thead>
           <tbody>
             ${rows.map((row) => `
               <tr class="filterable-row">
@@ -1391,16 +1399,110 @@ function renderDirectionFluctuationPanel() {
                 <td>${escapeHtml(row.dn || "-")}</td>
                 <td>${escapeHtml(rankLabel(row.rank))}</td>
                 <td>${escapeHtml(row.actorName || "-")}</td>
-                <td><span class="fluctuation-chip ${row.type === "Eingestellt" ? "hired" : "dismissed"}">${escapeHtml(row.type)}</span></td>
+                <td><span class="fluctuation-chip ${fluctuationTypeClass(row)}">${escapeHtml(row.type)}</span></td>
                 <td>${escapeHtml(row.reason || "-")}</td>
                 <td>${formatDateTime(row.createdAt)}</td>
+                ${canManage ? `<td><span class="button-row"><button class="mini-icon edit-fluctuation" data-id="${escapeHtml(row.id)}" title="Bearbeiten">${actionIcon("edit")}</button><button class="mini-icon danger delete-fluctuation" data-id="${escapeHtml(row.id)}" title="Löschen">${actionIcon("delete")}</button></span></td>` : ""}
               </tr>
-            `).join("") || `<tr><td colspan="7" class="muted">Noch keine Einträge.</td></tr>`}
+            `).join("") || `<tr><td colspan="${canManage ? 8 : 7}" class="muted">Noch keine Einträge.</td></tr>`}
           </tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+function isDismissedFluctuation(row) {
+  return row?.type === "Kündigung" || row?.type === "KÃ¼ndigung";
+}
+
+function fluctuationTypeClass(row) {
+  return row?.type === "Eingestellt" ? "hired" : "dismissed";
+}
+
+function fluctuationById(id) {
+  return (state.settings.fluctuation || []).find((row) => row.id === id);
+}
+
+function datetimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function bindFluctuationActions() {
+  if (!canManageFluctuation()) return;
+  document.querySelectorAll(".edit-fluctuation").forEach((button) => {
+    button.addEventListener("click", () => openFluctuationModal(fluctuationById(button.dataset.id)));
+  });
+  document.querySelectorAll(".delete-fluctuation").forEach((button) => {
+    button.addEventListener("click", () => openDeleteFluctuationModal(fluctuationById(button.dataset.id)));
+  });
+}
+
+function openFluctuationModal(row) {
+  if (!row || !canManageFluctuation()) return;
+  const selectedType = isDismissedFluctuation(row) ? "Kündigung" : "Eingestellt";
+  openModal(`
+    <h3>Fluktuationseintrag bearbeiten</h3>
+    <form id="fluctuationForm" class="modal-form">
+      <label>Name<input id="fluctuationName" required value="${escapeHtml(row.name || "")}"></label>
+      <label>DN<input id="fluctuationDn" value="${escapeHtml(row.dn || "")}"></label>
+      <label>Rang<select id="fluctuationRank">${state.ranks.map((rank) => `<option value="${rank.level}" ${Number(row.rank) === Number(rank.level) ? "selected" : ""}>${escapeHtml(rankOptionLabel(rank))}</option>`).join("")}</select></label>
+      <label>Bearbeitet von<input id="fluctuationActor" value="${escapeHtml(row.actorName || "")}"></label>
+      <label>Typ<select id="fluctuationType"><option ${selectedType === "Eingestellt" ? "selected" : ""}>Eingestellt</option><option ${selectedType === "Kündigung" ? "selected" : ""}>Kündigung</option></select></label>
+      <label>Grund<textarea id="fluctuationReason" rows="4">${escapeHtml(row.reason || "")}</textarea></label>
+      <label>Datum<input id="fluctuationCreatedAt" type="datetime-local" value="${datetimeLocalValue(row.createdAt)}"></label>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" onclick="closeModal()">Abbrechen</button>
+        <button class="blue-btn">Speichern</button>
+      </div>
+    </form>
+  `, () => {
+    $("#fluctuationForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = await api(`/settings/fluctuation/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: $("#fluctuationName").value,
+          dn: $("#fluctuationDn").value,
+          rank: Number($("#fluctuationRank").value),
+          actorName: $("#fluctuationActor").value,
+          type: $("#fluctuationType").value,
+          reason: $("#fluctuationReason").value,
+          createdAt: $("#fluctuationCreatedAt").value
+        })
+      });
+      state.settings.fluctuation = data.fluctuation || state.settings.fluctuation;
+      closeModal();
+      renderApp();
+    });
+  });
+}
+
+function openDeleteFluctuationModal(row) {
+  if (!row || !canManageFluctuation()) return;
+  openModal(`
+    <h3>Fluktuationseintrag löschen</h3>
+    <p class="muted">Dieser Eintrag wird dauerhaft aus Direktion und aus dem Reiter Mitgliederfluktation entfernt.</p>
+    <div class="profile-summary">
+      <strong>${escapeHtml(row.name || "-")}</strong>
+      <span>${escapeHtml(row.type || "-")} · ${formatDateTime(row.createdAt)}</span>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="ghost-btn" onclick="closeModal()">Abbrechen</button>
+      <button id="confirmDeleteFluctuation" class="red-btn">Löschen</button>
+    </div>
+  `, () => {
+    $("#confirmDeleteFluctuation").addEventListener("click", async () => {
+      const data = await api(`/settings/fluctuation/${row.id}`, { method: "DELETE" });
+      state.settings.fluctuation = data.fluctuation || [];
+      closeModal();
+      renderApp();
+    });
+  });
 }
 
 function renderDirectionHoursPanel() {
@@ -1697,6 +1799,7 @@ function renderLogsPanel() {
 
 function renderFluctuation() {
   const rows = state.settings.fluctuation || [];
+  const canManage = canManageFluctuation();
   const selectedRange = localStorage.getItem("lspd_fluctuation_range") || "Monat";
   const from = rangeStart(selectedRange);
   const rangeRows = rows.filter((row) => !from || new Date(row.createdAt) >= from);
@@ -1705,12 +1808,12 @@ function renderFluctuation() {
     const key = new Date(row.createdAt).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
     acc[key] ||= { hired: 0, dismissed: 0 };
     if (row.type === "Eingestellt") acc[key].hired += 1;
-    if (row.type === "Kündigung") acc[key].dismissed += 1;
+    if (isDismissedFluctuation(row)) acc[key].dismissed += 1;
     return acc;
   }, {});
   const summary = Object.entries(grouped).length ? Object.entries(grouped) : [[monthLabel, { hired: 0, dismissed: 0 }]];
   const totalHired = rangeRows.filter((row) => row.type === "Eingestellt").length;
-  const totalDismissed = rangeRows.filter((row) => row.type === "Kündigung").length;
+  const totalDismissed = rangeRows.filter(isDismissedFluctuation).length;
   content.innerHTML = `
     <section class="panel fluctuation-summary">
       <div class="panel-header">
@@ -1737,15 +1840,17 @@ function renderFluctuation() {
       <div class="panel-header"><h3>Mitgliederfluktation</h3><span class="muted">${rangeRows.length} Einträge</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Typ</th><th>Datum</th></tr></thead>
+          <thead><tr><th>Name</th><th>Typ</th><th>Grund</th><th>Datum</th>${canManage ? "<th>Aktionen</th>" : ""}</tr></thead>
           <tbody>
             ${rangeRows.length ? rangeRows.map((row) => `
               <tr class="filterable-row">
                 <td>${escapeHtml(row.name)}</td>
-                <td><span class="fluctuation-chip ${row.type === "Eingestellt" ? "hired" : "dismissed"}">${escapeHtml(row.type)}</span></td>
+                <td><span class="fluctuation-chip ${fluctuationTypeClass(row)}">${escapeHtml(row.type)}</span></td>
+                <td>${escapeHtml(row.reason || "-")}</td>
                 <td>${formatDateTime(row.createdAt)}</td>
+                ${canManage ? `<td><span class="button-row"><button class="mini-icon edit-fluctuation" data-id="${escapeHtml(row.id)}" title="Bearbeiten">${actionIcon("edit")}</button><button class="mini-icon danger delete-fluctuation" data-id="${escapeHtml(row.id)}" title="Löschen">${actionIcon("delete")}</button></span></td>` : ""}
               </tr>
-            `).join("") : `<tr><td colspan="3" class="muted">Noch keine Einträge.</td></tr>`}
+            `).join("") : `<tr><td colspan="${canManage ? 5 : 4}" class="muted">Noch keine Einträge.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1755,6 +1860,7 @@ function renderFluctuation() {
     localStorage.setItem("lspd_fluctuation_range", event.target.value);
     renderFluctuation();
   });
+  bindFluctuationActions();
 }
 
 function editableItPages() {
@@ -6860,11 +6966,11 @@ function renderSeizures() {
       </div>
       <section class="panel seizure-panel">
         <div class="panel-header">
-          <div><h3>${iconSvg("Beschlagnahmung")} Beschlagnahmungen (${filtered.length})</h3><p class="muted">Suche nach Tatverdächtigem, Standort, Agent oder Beweis.</p></div>
+          <div><h3>${iconSvg("Beschlagnahmung")} Beschlagnahmungen (${filtered.length})</h3><p class="muted">Suche nach Tatverdächtigem, Standort, Officer oder Beweis.</p></div>
           <button class="blue-btn" id="addSeizureBtn">${iconSvg("Plus")} Neue Beschlagnahmung</button>
         </div>
         <div class="seizure-search-row">
-          <input id="seizureSearch" value="${escapeHtml(search)}" placeholder="Suche nach Tatverdächtiger, Standort, Agent oder Beweis...">
+          <input id="seizureSearch" value="${escapeHtml(search)}" placeholder="Suche nach Tatverdächtiger, Standort, Officer oder Beweis...">
           <button class="blue-btn" id="runSeizureSearch">Suchen</button>
         </div>
         <div class="table-wrap seizure-table-wrap">
@@ -6877,7 +6983,7 @@ function renderSeizures() {
                 <th>Schwarzgeld</th>
                 <th>Kisten</th>
                 <th>Art</th>
-                <th>Agent</th>
+                <th>Officer</th>
                 <th>Mord/Totschlag</th>
                 <th>Zeitstempel</th>
                 <th>Erfasst von</th>
@@ -7021,9 +7127,9 @@ function openSeizureModal(item = null) {
           <label><input type="radio" name="seizureSourceType" value="Dealer" ${item?.sourceType === "Dealer" ? "checked" : ""}><span>Dealer</span></label>
         </div>
       </div>
-      <label>Zeuge / Agent
+      <label>Zeuge / Officer
         <select id="seizureWitness">
-          <option value="" ${item?.witness ? "" : "selected"}>Agent auswählen...</option>
+          <option value="" ${item?.witness ? "" : "selected"}>Officer auswählen...</option>
           ${witnessOptions}
         </select>
       </label>
@@ -7539,7 +7645,7 @@ function openStopAllDutyModal() {
     return;
   }
   openModal(`
-    <h3>Alle Agents austragen</h3>
+    <h3>Alle Officer austragen</h3>
     <p class="muted">Damit werden alle aktiven Dienst-Einträge beendet.</p>
     <p id="modalError" class="form-error"></p>
     <div class="modal-actions">

@@ -2,6 +2,39 @@
   return localStorage.getItem("lspd_devmode_active") === "1";
 }
 
+function installSourceProtection() {
+  const blockedKeys = new Set(["F12"]);
+  const blockedCombos = [
+    (event) => event.ctrlKey && event.shiftKey && ["I", "J", "C"].includes(event.key.toUpperCase()),
+    (event) => event.ctrlKey && ["U", "S"].includes(event.key.toUpperCase())
+  ];
+  const block = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showSourceProtectionOverlay();
+    return false;
+  };
+
+  document.addEventListener("contextmenu", block, true);
+  document.addEventListener("keydown", (event) => {
+    if (blockedKeys.has(event.key) || blockedCombos.some((matches) => matches(event))) {
+      block(event);
+    }
+  }, true);
+
+  setInterval(() => {
+    const devtoolsLikelyOpen = window.outerWidth - window.innerWidth > 170 || window.outerHeight - window.innerHeight > 170;
+    document.documentElement.classList.toggle("source-protection-active", devtoolsLikelyOpen);
+  }, 700);
+}
+
+function showSourceProtectionOverlay() {
+  document.documentElement.classList.add("source-protection-active");
+  window.setTimeout(() => document.documentElement.classList.remove("source-protection-active"), 1800);
+}
+
+installSourceProtection();
+
 function storedAuthToken() {
   return isDevModeAuthStorage() ? sessionStorage.getItem("lspd_token_dev") : localStorage.getItem("lspd_token");
 }
@@ -177,7 +210,7 @@ function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
     return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar">`;
   }
-  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-1" alt="LSPD">`;
+  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-2" alt="LSPD">`;
 }
 
 function rankLabel(rank) {

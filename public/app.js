@@ -1,39 +1,6 @@
-﻿function isDevModeAuthStorage() {
+function isDevModeAuthStorage() {
   return localStorage.getItem("lspd_devmode_active") === "1";
 }
-
-function installSourceProtection() {
-  const blockedKeys = new Set(["F12"]);
-  const blockedCombos = [
-    (event) => event.ctrlKey && event.shiftKey && ["I", "J", "C"].includes(event.key.toUpperCase()),
-    (event) => event.ctrlKey && ["U", "S"].includes(event.key.toUpperCase())
-  ];
-  const block = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    showSourceProtectionOverlay();
-    return false;
-  };
-
-  document.addEventListener("contextmenu", block, true);
-  document.addEventListener("keydown", (event) => {
-    if (blockedKeys.has(event.key) || blockedCombos.some((matches) => matches(event))) {
-      block(event);
-    }
-  }, true);
-
-  setInterval(() => {
-    const devtoolsLikelyOpen = window.outerWidth - window.innerWidth > 170 || window.outerHeight - window.innerHeight > 170;
-    document.documentElement.classList.toggle("source-protection-active", devtoolsLikelyOpen);
-  }, 700);
-}
-
-function showSourceProtectionOverlay() {
-  document.documentElement.classList.add("source-protection-active");
-  window.setTimeout(() => document.documentElement.classList.remove("source-protection-active"), 1800);
-}
-
-installSourceProtection();
 
 function storedAuthToken() {
   return isDevModeAuthStorage() ? sessionStorage.getItem("lspd_token_dev") : localStorage.getItem("lspd_token");
@@ -52,6 +19,44 @@ function storeAuthToken(token) {
 function clearAuthToken() {
   if (isDevModeAuthStorage()) sessionStorage.removeItem("lspd_token_dev");
   else localStorage.removeItem("lspd_token");
+}
+
+function installInspectGuard() {
+  const blocker = $("#inspectBlocker");
+  let lastReportAt = 0;
+  const reportAttempt = (reason) => {
+    const now = Date.now();
+    if (now - lastReportAt < 2500) return;
+    lastReportAt = now;
+    fetch("/api/security/inspect-attempt", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(state.token ? { Authorization: `Bearer ${state.token}` } : {})
+      },
+      body: JSON.stringify({ reason, page: state.page || document.title })
+    }).catch(() => {});
+  };
+  const showBlocker = (reason) => {
+    if (!blocker) return;
+    blocker.classList.remove("hidden");
+    window.setTimeout(() => blocker.classList.add("hidden"), 2200);
+    reportAttempt(reason);
+  };
+  document.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    showBlocker("Rechtsklick / Kontextmenü");
+  });
+  document.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    const blocked = event.key === "F12"
+      || (event.ctrlKey && event.shiftKey && ["i", "j", "c"].includes(key))
+      || (event.ctrlKey && ["u", "s"].includes(key));
+    if (!blocked) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showBlocker(`Tastenkürzel ${event.ctrlKey ? "Ctrl+" : ""}${event.shiftKey ? "Shift+" : ""}${event.key}`);
+  }, true);
 }
 
 const state = {
@@ -112,7 +117,7 @@ const adminPages = ["IT", "Direktion"];
 const positionOrder = { "Direktion": 5, "Leitung": 4, "Stv. Leitung": 3, "Mitglied": 2, "Anwärter": 1 };
 const trainingGroups = [
   ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted"],
-  ["EL", "Beamtenprüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II"],
+  ["EL", "Agent Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II"],
   ["Air Support", "Riot", "Coquette"]
 ];
 const trainings = trainingGroups.flat();
@@ -121,10 +126,15 @@ let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1
 let selectedCalendarDate = isoDateLocal(new Date());
 let trainingTimerInterval = null;
 const dutyOptions = [
-  { title: "Innendienst", description: "Büro & Verwaltung" },
-  { title: "Außendienst", description: "Streife & Einsatz" },
-  { title: "Undercover Dienst", description: "Zivil Einheit" }
+  { title: "Innendienst", description: "Büro, Verwaltung, Leitstelle", icon: "Abteilungen", tone: "inside" },
+  { title: "Außendienst", description: "Streife, Einsatz und Außendienst", icon: "Kalender", tone: "outside" },
+  { title: "Undercover Dienst", description: "Zivile Arbeit und verdeckte Maßnahmen", icon: "Mitglieder", tone: "undercover" },
+  { title: "Admin Dienst", description: "Teamler / administrative Tätigkeiten", icon: "IT", teamlerOnly: true, tone: "admin" }
 ];
+
+function availableDutyOptions() {
+  return dutyOptions;
+}
 
 const pageDescriptions = {
   "Einsatzzentrale": "Koordination laufender Einsätze und operativer Meldungen",
@@ -210,16 +220,16 @@ function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
     return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar">`;
   }
-  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-2" alt="LSPD">`;
+  return `<div class="avatar ${size} avatar-fallback"><span>LSPD</span></div>`;
 }
 
 function rankLabel(rank) {
   const found = state.ranks.find((item) => Number(item.value) === Number(rank));
-  return found ? found.label : `Rang ${rank}`;
+  return found ? found.label : `Template ${rank} - Rang ${rank}`;
 }
 
 function rankOptionLabel(rank) {
-  const label = String(rank.label || `Rang ${rank.value}`);
+  const label = String(rank.label || `Template ${rank.value} - Rang ${rank.value}`);
   return /\(\d+\)\s*$/.test(label) ? label : `${label} (${rank.value})`;
 }
 
@@ -253,6 +263,7 @@ function iconSvg(page) {
     "Postfach": '<path d="M4 5h16v12H7l-3 3V5Z"/>',
     "Profil": '<circle cx="12" cy="8" r="4"/><path d="M6 21a6 6 0 0 1 12 0"/>',
     "Kalender": '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M16 3v4M8 3v4M4 10h16"/>',
+    "Settings": '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2 .4l-.2.2-3.8-2.2.1-.3a1.8 1.8 0 0 0-.8-1.8 1.8 1.8 0 0 0-2 .1l-.3.2-3.3-2 .1-.3a1.8 1.8 0 0 0-.4-2l-.2-.2 2-3.4.3.1a1.8 1.8 0 0 0 2-.4l.2-.2 3.8 2.2-.1.3a1.8 1.8 0 0 0 .8 1.8 1.8 1.8 0 0 0 2-.1l.3-.2 3.3 2Z"/>',
     "ChevronDown": '<path d="m6 9 6 6 6-6"/>',
     "Plus": '<path d="M12 5v14M5 12h14"/>',
     "Lock": '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
@@ -333,6 +344,7 @@ function roleClass(role) {
 function roleBadges(user) {
   const baseRole = user?.baseRole || (["IT", "IT-Leitung"].includes(user?.role) ? "Direktion" : user?.role || "User");
   const roles = user?.role === "IT-Leitung" ? [baseRole, "IT", "IT-Leitung"] : user?.role === "IT" ? [baseRole, "IT"] : [baseRole];
+  if (user?.teamler) roles.push("Teamler");
   return roles.map((role) => `<span class="role-pill ${roleClass(role)}">${escapeHtml(role)}</span>`).join("");
 }
 
@@ -487,7 +499,7 @@ function successMessage(path, method) {
   if (path.includes("/login")) return "Erfolgreich angemeldet.";
   if (path.includes("/logout")) return "Erfolgreich abgemeldet.";
   if (path.includes("/duty/start")) return "Dienst gestartet.";
-  if (path.includes("/duty/stop-all")) return "Alle Beamten wurden ausgetragen.";
+  if (path.includes("/duty/stop-all")) return "Alle Agents wurden ausgetragen.";
   if (path.includes("/duty/stop")) return "Dienst beendet.";
   if (path.includes("/notes") && method === "POST") return "Notiz erstellt.";
   if (path.includes("/notes") && method === "PATCH") return "Notiz aktualisiert.";
@@ -500,6 +512,9 @@ function successMessage(path, method) {
   if (path.includes("/profile/password")) return "Passwort geändert.";
   if (path.includes("/profile/avatar")) return "Avatar gespeichert.";
   if (path.includes("/file")) return method === "DELETE" ? "Akteneintrag entfernt." : "Akteneintrag gespeichert.";
+  if (path.includes("/seizures") && method === "POST") return "Beschlagnahmung eingetragen.";
+  if (path.includes("/seizures") && method === "PATCH") return "Beschlagnahmung gespeichert.";
+  if (path.includes("/seizures") && method === "DELETE") return "Beschlagnahmung gelöscht.";
   if (path.includes("/suspend")) return "Mitglied suspendiert.";
   if (path.includes("/dismiss")) return "Mitglied entlassen.";
   if (path.includes("/users") && method === "POST") return "Mitglied eingestellt.";
@@ -513,14 +528,17 @@ function successMessage(path, method) {
 }
 
 function showNotify(message, type = "success") {
+  if (type === "success" && /(gelöscht|löschen|entfernt|entfernen|abgelehnt|fehlgeschlagen|fehler)/i.test(cleanText(message))) {
+    type = /(fehlgeschlagen|fehler)/i.test(cleanText(message)) ? "error" : "danger";
+  }
   const duration = Math.min(5000, Math.max(3000, 2200 + String(message).length * 35));
   const item = document.createElement("div");
   item.className = `notify ${type}`;
   item.style.setProperty("--notify-duration", `${duration}ms`);
   item.innerHTML = `
-    <div class="notify-icon">${type === "success" ? "✓" : "!"}</div>
+    <div class="notify-icon">${type === "success" ? "✓" : type === "danger" ? "×" : "!"}</div>
     <div class="notify-copy">
-      <strong>${type === "success" ? "Erfolg" : "Fehler"}</strong>
+      <strong>${type === "success" ? "Erfolg" : type === "danger" ? "Gelöscht" : "Fehler"}</strong>
       <span>${escapeHtml(message)}</span>
     </div>
     <div class="notify-progress"></div>
@@ -543,11 +561,13 @@ async function bootstrap() {
 }
 
 function showLogin() {
+  $("#loadingView")?.classList.add("hidden");
   $("#loginView").classList.remove("hidden");
   $("#appView").classList.add("hidden");
 }
 
 function showApp() {
+  $("#loadingView")?.classList.add("hidden");
   $("#loginView").classList.add("hidden");
   $("#appView").classList.remove("hidden");
 }
@@ -638,6 +658,7 @@ function renderPage() {
   if (state.page === "Dienstblatt") return renderDienstblatt();
   if (state.page === "Mitglieder") return renderMembers();
   if (state.page === "Mitgliederfluktation") return renderFluctuation();
+  if (state.page === "Beschlagnahmung") return renderSeizures();
   if (state.page === "Kalender") return renderCalendar();
   if (state.page === "Informationen") return renderInformation();
   if (state.page === "Direktion") return renderDirektion();
@@ -651,6 +672,9 @@ function renderPage() {
 function renderDienstblatt() {
   const agents = state.duty.length;
   const undercover = state.duty.filter((entry) => entry.status === "Undercover Dienst").length;
+  const outside = state.duty.filter((entry) => entry.status === "Außendienst").length;
+  const inside = state.duty.filter((entry) => entry.status === "Innendienst").length;
+  const adminDuty = state.duty.filter((entry) => entry.status === "Admin Dienst").length;
   const myDuty = state.duty.find((entry) => entry.userId === state.currentUser.id);
 
   content.innerHTML = `
@@ -666,10 +690,10 @@ function renderDienstblatt() {
     </section>
 
     <section class="grid-4 dashboard-stats">
-      <div class="stat-card"><span>Aktive Beamte</span><i>${iconSvg("Einsatzzentrale")}</i><strong>${agents}</strong><small>Im Einsatz</small></div>
+      <div class="stat-card"><span>Aktive Agents</span><i>${iconSvg("Einsatzzentrale")}</i><strong>${agents}</strong><small>Im Einsatz</small></div>
+      <div class="stat-card"><span>Außendienst</span><i>${iconSvg("Kalender")}</i><strong>${outside}</strong><small>Auf Streife</small></div>
       <div class="stat-card"><span>Undercover Dienst</span><i>${iconSvg("Mitglieder")}</i><strong>${undercover}</strong><small>Zivil Einheit</small></div>
-      <div class="stat-card"><span>Innendienst</span><i>${iconSvg("Abteilungen")}</i><strong>${state.duty.filter((entry) => entry.status === "Innendienst").length}</strong><small>Im Büro</small></div>
-      <div class="stat-card"><span>Außendienst</span><i>${iconSvg("Kalender")}</i><strong>${state.duty.filter((entry) => entry.status === "Außendienst").length}</strong><small>Auf Streife</small></div>
+      <div class="stat-card"><span>Innendienst ${adminDuty ? `<em class="admin-duty-count">(${adminDuty})</em>` : ""}</span><i>${iconSvg("Abteilungen")}</i><strong>${inside}</strong><small>Im Büro${adminDuty ? " · Admin Dienst" : ""}</small></div>
     </section>
 
     <section class="panel">
@@ -684,8 +708,9 @@ function renderDienstblatt() {
 
     <section class="panel">
       <div class="panel-header">
-        <h3><span class="section-icon">♙</span>Aktive Beamte</h3>
+        <h3><span class="section-icon">♙</span>Aktive Agents</h3>
         <div class="button-row">
+          ${myDuty ? `<button class="ghost-btn action-btn" id="switchDutyBtn"><span>${iconSvg("Einsatzzentrale")}</span> Umtragen</button>` : ""}
           <button class="blue-btn action-btn" id="startDutyBtn"><span>+</span> Eintragen</button>
           <button class="red-btn action-btn" id="stopDutyBtn"><span>${iconSvg("Profil")}</span> Austragen</button>
           ${canAccess("actions", "stopAllDuty", "Direktion") ? `<button class="orange-btn action-btn" id="stopAllDutyBtn"><span>${iconSvg("Mitglieder")}</span> Alle Austragen</button>` : ""}
@@ -698,6 +723,7 @@ function renderDienstblatt() {
   $("#defconBtn")?.addEventListener("click", openDefconModal);
   $("#addNoteBtn")?.addEventListener("click", () => openNoteModal());
   $("#startDutyBtn").addEventListener("click", openStartDutyModal);
+  $("#switchDutyBtn")?.addEventListener("click", openSwitchDutyModal);
   $("#stopDutyBtn").addEventListener("click", () => openStopDutyModal(myDuty));
   $("#stopAllDutyBtn")?.addEventListener("click", openStopAllDutyModal);
 }
@@ -733,6 +759,12 @@ function defconClass(defcon) {
 
 function renderDutyTable() {
   if (!state.duty.length) return `<p class="muted">Aktuell ist niemand im Dienst.</p>`;
+  const sortedDuty = [...state.duty].sort((a, b) => {
+    const userA = a.user || state.users.find((item) => item.id === a.userId) || {};
+    const userB = b.user || state.users.find((item) => item.id === b.userId) || {};
+    return Number(userB.rank || 0) - Number(userA.rank || 0)
+      || fullName(userA).localeCompare(fullName(userB), "de");
+  });
   return `
     <div class="table-wrap">
       <table>
@@ -742,7 +774,7 @@ function renderDutyTable() {
           </tr>
         </thead>
         <tbody>
-          ${state.duty.map((entry) => {
+          ${sortedDuty.map((entry) => {
             const user = entry.user || state.users.find((item) => item.id === entry.userId);
             return `
               <tr>
@@ -763,6 +795,7 @@ function renderDutyTable() {
 
 function statusClass(status) {
   if (status === "Innendienst") return "status-inside";
+  if (status === "Admin Dienst") return "status-admin";
   if (status === "Außendienst") return "status-outside";
   if (status === "Undercover Dienst") return "status-undercover";
   return "";
@@ -770,11 +803,15 @@ function statusClass(status) {
 
 function renderMembers() {
   const rows = [...state.users].sort((a, b) => b.rank - a.rank || a.lastName.localeCompare(b.lastName));
+  const search = localStorage.getItem("lspd_members_search") || "";
   content.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <h3>Mitglieder</h3>
         <span class="muted">${rows.length} Einträge</span>
+      </div>
+      <div class="filter-row members-search-row">
+        <input id="membersSearch" value="${escapeHtml(search)}" placeholder="Mitglied, DN, Rang oder Ausbildung suchen">
       </div>
       <div class="table-wrap">
         <table class="members-table">
@@ -791,11 +828,11 @@ function renderMembers() {
           </thead>
           <tbody>
             ${rows.map((user) => `
-              <tr class="${user.id === state.currentUser?.id ? "member-row-self" : ""}">
+              <tr class="filterable-row ${user.id === state.currentUser?.id ? "member-row-self" : ""}">
                 <td class="member-name-col text-left"><span class="member-name member-name-wrap">${avatarMarkup(user, "sm")}<span>${wrapNameForTable(fullName(user))}</span></span></td>
                 <td class="text-center">${escapeHtml(user.phone)}</td>
                 <td class="text-left">${escapeHtml(user.dn)}</td>
-                <td class="member-rank-col text-center"><span class="rank-wrap">${escapeHtml(rankLabel(user.rank))}</span></td>
+                <td class="member-rank-col text-center"><span class="rank-number" title="${escapeHtml(rankLabel(user.rank))}">${escapeHtml(user.rank)}</span></td>
                 <td class="text-left">${formatDate(user.joinedAt)}</td>
                 <td class="text-left">${formatDate(user.lastPromotionAt)}</td>
                 ${trainingGroups.map((group) => group.map((training) => {
@@ -809,6 +846,9 @@ function renderMembers() {
       </div>
     </section>
   `;
+  setupTableFilter("#membersSearch");
+  $("#membersSearch")?.addEventListener("input", (event) => localStorage.setItem("lspd_members_search", event.target.value));
+  if (search) $("#membersSearch")?.dispatchEvent(new Event("input"));
 }
 
 function renderInformation() {
@@ -1031,6 +1071,28 @@ async function deleteInformationItem(key, id) {
   }
 }
 
+function openDeleteInformationConfirm(key, id, title = "Eintrag löschen?") {
+  openModal(`
+    <h3>${escapeHtml(title)}</h3>
+    <p class="muted">Dieser Eintrag wird dauerhaft entfernt.</p>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions">
+      <button class="ghost-btn" data-close>Abbrechen</button>
+      <button class="red-btn" id="confirmInformationDelete">Löschen</button>
+    </div>
+  `, (modal) => {
+    modal.querySelector("#confirmInformationDelete").addEventListener("click", async () => {
+      try {
+        await deleteInformationItem(key, id);
+        closeModal();
+        renderInformation();
+      } catch (error) {
+        $("#modalError").textContent = error.message;
+      }
+    });
+  });
+}
+
 function renderDirektion() {
   if (!canSeeDepartment("Direktion")) {
     content.innerHTML = `<section class="panel"><h3>Kein Zugriff</h3><p class="muted">Dieser Bereich ist nur für die Direktion sichtbar.</p></section>`;
@@ -1147,7 +1209,7 @@ function renderDirectionMembersPanel() {
           <tbody>
             ${state.users.map((user) => `
               <tr class="${userStatusRowClass(user)}">
-                <td>${escapeHtml(fullName(user))}</td>
+                <td><strong>${escapeHtml(fullName(user))}</strong><small class="table-subline">Einstellung: ${formatDate(user.joinedAt)}</small></td>
                 <td>${escapeHtml(user.phone)}</td>
                 <td>${escapeHtml(user.dn)}</td>
                 <td>${escapeHtml(rankLabel(user.rank))}</td>
@@ -1301,6 +1363,16 @@ function renderItRoleControls(user = null) {
         <span><b>IT-Leitung</b><small>Darf IT-Rollen vergeben</small></span>
       </label>
     </div>
+  `;
+}
+
+function renderTeamlerControl(user = null) {
+  return `
+    <label class="it-toggle">
+      <input type="checkbox" name="teamler" ${user?.teamler ? "checked" : ""}>
+      <span class="it-toggle-ui"></span>
+      <span><b>Teamler</b><small>Darf Admin Dienst stempeln</small></span>
+    </label>
   `;
 }
 
@@ -1574,7 +1646,11 @@ function renderDirectionUprankRulesPanel() {
               <small>Zielrang ${rule.targetRank}</small>
             </div>
             <label>Min. Tage auf Rang<input type="number" min="0" name="minDays_${rule.targetRank}" value="${Number(rule.minDays || 0)}"></label>
-            <label class="checkbox-line">Nur Sonderuprank<input type="checkbox" name="specialOnly_${rule.targetRank}" ${rule.specialOnly ? "checked" : ""}></label>
+            <label class="it-toggle compact-rule-toggle">
+              <input type="checkbox" name="specialOnly_${rule.targetRank}" ${rule.specialOnly ? "checked" : ""}>
+              <span class="it-toggle-ui"></span>
+              <span><b>Nur Sonderuprank</b><small>Reguläre Dauer/Ausbildung wird nicht automatisch vorgeschlagen.</small></span>
+            </label>
             <div class="rule-training-grid">
               ${trainings.map((training) => `
                 <label class="training-toggle">
@@ -1726,6 +1802,7 @@ function canGrantItRoles() {
 
 function departmentTab(department) {
   const selected = state.departmentTabs?.[department.id] || "overview";
+  if (selected === "members") return "overview";
   if (selected === "leadership" && !departmentActionAllowed(department, "departmentLeadership")) return "overview";
   return selected;
 }
@@ -1740,7 +1817,7 @@ function renderPermissionPickList(type, items, selected = []) {
     role: "z.B. User, Supervisor, Direktion",
     department: "z.B. SWAT, Training, Metro",
     position: "z.B. Leitung, Stv. Leitung, Anwärter",
-    rank: "z.B. 0, 5, Sergeant, Chief",
+    rank: "z.B. 0, 5, Sergeant, Director",
     user: "z.B. Name, Dienstnummer, Alexa"
   };
   return `
@@ -1823,11 +1900,11 @@ function renderIT() {
   const editablePages = editableItPages();
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
   content.innerHTML = `
-    <section class="it-dashboard-head">
-      <div class="panel it-hero-panel">
+    <section class="it-command-center">
+      <div class="panel it-hero-panel it-overview-card">
         <div>
           <h3><span class="section-icon">${iconSvg("IT")}</span>IT Verwaltung</h3>
-          <p class="muted">Reiter, Rechte, Ränge und Systemfunktionen an einem Ort.</p>
+          <p class="muted">Systemsteuerung, Rechte, Mitglieder und Ränge übersichtlich getrennt.</p>
         </div>
         <div class="it-hero-stats">
           <span><b>${editablePages.length}</b> Reiter</span>
@@ -1835,83 +1912,97 @@ function renderIT() {
           <span><b>${state.users.length}</b> Accounts</span>
         </div>
       </div>
-      <div class="it-tool-grid compact">
-        <button class="it-tool" id="exportDataBtn">
-          <strong>Datensicherung</strong>
-          <span>JSON exportieren</span>
-        </button>
-        <button class="it-tool" id="importDataBtn">
-          <strong>Datenimport</strong>
-          <span>JSON wiederherstellen</span>
-        </button>
-        <button class="it-tool" id="clearSessionsBtn">
-          <strong>Sessions</strong>
-          <span>Andere Logins abmelden</span>
-        </button>
-        <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="toggleDevModeBtn">
-          <strong>Devmode</strong>
-          <span>${state.settings?.devMode ? "Aktiv - pro Tab ein Account" : "Aus - normaler Login"}</span>
-        </button>
-        <div class="it-tool">
-          <strong>Speicher</strong>
-          <span>storage/dienstblatt.json</span>
-        </div>
-      </div>
     </section>
 
-    <section class="it-layout">
-    <div class="panel it-card">
-      <div class="panel-header"><div><h3>Reiter bearbeiten</h3><p class="muted">Namen ändern und Rechte direkt pro Reiter öffnen.</p></div><button class="blue-btn" id="saveNavLabels" type="button">Speichern</button></div>
-      <div class="edit-list it-compact-list">
-        ${editablePages.map((page, index) => `
-          ${isInternalSheetPage(page) && !isInternalSheetPage(editablePages[index - 1] || "") ? `<div class="edit-section-divider"><span>Abteilungsblätter</span><small>Direktion, IT und Abteilungen mit eigenen Rechten für Ansicht, Personal, Notizen und interne Buttons.</small></div>` : ""}
-          <label class="edit-row">
-            <span class="edit-icon">${iconSvg(page)}</span>
-            <span class="edit-name">${isPageViewRestricted(page) ? `<span class="page-lock" title="Ansehen ist eingeschränkt">${iconSvg("Lock")}</span>` : ""}${escapeHtml(isDepartmentPage(page) ? navLabel(page) : page)}</span>
-            <input data-nav-key="${escapeHtml(page)}" value="${escapeHtml(navLabel(page))}">
-            <button class="mini-icon page-permission-open" type="button" data-page-key="${escapeHtml(page)}" title="Rechte verwalten" aria-label="Rechte verwalten">${actionIcon("edit")}</button>
-          </label>
-        `).join("")}
-      </div>
-      <p id="navSaveMessage" class="muted"></p>
-    </div>
-
-    <div class="panel it-card">
-      <div class="panel-header">
-        <div><h3>Mitglieder verwalten</h3><p class="muted">Accounts, Ränge und IT-Zugänge direkt im IT-Blatt bearbeiten.</p></div>
-        <button class="blue-btn" id="itCreateMember" type="button">Neues Mitglied einstellen</button>
-      </div>
-      <div class="it-member-list">
-        ${state.users.map((user) => `
-          <div class="it-member-row">
-            <span>${avatarMarkup(user, "sm")}<span><strong>${escapeHtml(fullName(user))}</strong><small>DN ${escapeHtml(user.dn || "-")} · ${escapeHtml(rankLabel(user.rank))}</small></span></span>
-            <span class="it-member-roles">${roleBadges(user)}</span>
-            <button class="mini-icon it-edit-member" type="button" data-user-id="${escapeHtml(user.id)}" title="Mitglied bearbeiten">${actionIcon("edit")}</button>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-
-    <div class="panel it-card">
-      <div class="panel-header">
-        <h3>Ränge bearbeiten</h3>
-        <div class="button-row">
-        <button class="ghost-btn" id="addRank" type="button">Rang hinzufügen</button>
-        <button class="red-btn" id="removeRank" type="button">Rang entfernen</button>
-        <button class="blue-btn" id="saveRanks" type="button">Speichern</button>
+    <section class="it-workbench">
+      <div class="panel it-section-card it-system-card">
+        <div class="it-section-title">
+          <span>01</span>
+          <div><h3>System</h3><p class="muted">Sicherung, Import, Sessions und Devmode.</p></div>
+        </div>
+        <div class="it-action-grid">
+          <button class="it-tool" id="exportDataBtn"><strong>Datensicherung</strong><span>JSON exportieren</span></button>
+          <button class="it-tool" id="importDataBtn"><strong>Datenimport</strong><span>JSON wiederherstellen</span></button>
+          <button class="it-tool" id="clearSessionsBtn"><strong>Sessions</strong><span>Andere Logins abmelden</span></button>
+          <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="toggleDevModeBtn"><strong>Devmode</strong><span>${state.settings?.devMode ? "Aktiv - pro Tab ein Account" : "Aus - normaler Login"}</span></button>
+          <div class="it-tool passive"><strong>Speicher</strong><span>storage/dienstblatt.json</span></div>
         </div>
       </div>
-      <div class="edit-list rank-edit-list it-compact-list">
-        ${sortedRanks.map((rank) => `
-          <label class="edit-row">
-            <span class="rank-number">Rang ${rank.value}</span>
-            <input data-rank-value="${rank.value}" value="${escapeHtml(rank.label)}">
-            <span class="edit-pencil">${actionIcon("edit")}</span>
-          </label>
-        `).join("")}
+
+      <div class="panel it-section-card it-restarts-card">
+        <div class="it-section-title">
+          <span>02</span>
+          <div><h3>Restarts</h3><p class="muted">Tägliche Uhrzeiten, zu denen alle aktiven Dienste automatisch beendet werden.</p></div>
+        </div>
+        <div class="restart-editor">
+          <input id="restartTimeInput" type="time" value="00:00">
+          <button class="blue-btn" id="addRestartTime" type="button">Restartzeit hinzufügen</button>
+        </div>
+        <div class="restart-list">
+          ${(state.settings.restartTimes || []).map((time) => `
+            <span class="restart-chip"><b>${escapeHtml(time)}</b><button class="mini-icon delete-restart-time" type="button" data-time="${escapeHtml(time)}" title="Löschen">${actionIcon("delete")}</button></span>
+          `).join("") || `<p class="muted">Noch keine Restartzeiten angelegt.</p>`}
+        </div>
       </div>
-      <p id="rankSaveMessage" class="muted"></p>
-    </div>
+
+      <div class="panel it-section-card it-pages-card">
+        <div class="it-section-title">
+          <span>03</span>
+          <div><h3>Reiter & Rechte</h3><p class="muted">Namen ändern und Rechte direkt pro Reiter öffnen.</p></div>
+          <button class="blue-btn" id="saveNavLabels" type="button">Speichern</button>
+        </div>
+        <div class="edit-list it-compact-list">
+          ${editablePages.map((page, index) => `
+            ${isInternalSheetPage(page) && !isInternalSheetPage(editablePages[index - 1] || "") ? `<div class="edit-section-divider"><span>Abteilungsblätter</span><small>Direktion, IT und Abteilungen mit eigenen Rechten für Ansicht, Personal, Notizen und interne Buttons.</small></div>` : ""}
+            <label class="edit-row">
+              <span class="edit-icon">${iconSvg(page)}</span>
+              <span class="edit-name">${isPageViewRestricted(page) ? `<span class="page-lock" title="Ansehen ist eingeschränkt">${iconSvg("Lock")}</span>` : ""}${escapeHtml(isDepartmentPage(page) ? navLabel(page) : page)}</span>
+              <input data-nav-key="${escapeHtml(page)}" value="${escapeHtml(navLabel(page))}">
+              <button class="mini-icon page-permission-open" type="button" data-page-key="${escapeHtml(page)}" title="Rechte verwalten" aria-label="Rechte verwalten">${actionIcon("edit")}</button>
+            </label>
+          `).join("")}
+        </div>
+        <p id="navSaveMessage" class="muted"></p>
+      </div>
+
+      <div class="panel it-section-card it-members-card">
+        <div class="it-section-title">
+          <span>04</span>
+          <div><h3>Mitglieder</h3><p class="muted">Accounts, Ränge und IT-Zugänge direkt im IT-Blatt bearbeiten.</p></div>
+          <button class="blue-btn" id="itCreateMember" type="button">Neues Mitglied einstellen</button>
+        </div>
+        <div class="it-member-list">
+          ${state.users.map((user) => `
+            <div class="it-member-row">
+              <span>${avatarMarkup(user, "sm")}<span><strong>${escapeHtml(fullName(user))}</strong><small>DN ${escapeHtml(user.dn || "-")} · ${escapeHtml(rankLabel(user.rank))}</small></span></span>
+              <span class="it-member-roles">${roleBadges(user)}</span>
+              <button class="mini-icon it-edit-member" type="button" data-user-id="${escapeHtml(user.id)}" title="Mitglied bearbeiten">${actionIcon("edit")}</button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <div class="panel it-section-card it-ranks-card">
+        <div class="it-section-title">
+          <span>05</span>
+          <div><h3>Ränge</h3><p class="muted">Rangnamen bearbeiten, hinzufügen oder entfernen.</p></div>
+          <div class="button-row">
+            <button class="ghost-btn" id="addRank" type="button">Rang hinzufügen</button>
+            <button class="red-btn" id="removeRank" type="button">Rang entfernen</button>
+            <button class="blue-btn" id="saveRanks" type="button">Speichern</button>
+          </div>
+        </div>
+        <div class="edit-list rank-edit-list it-compact-list">
+          ${sortedRanks.map((rank) => `
+            <label class="edit-row">
+              <span class="rank-number">Rang ${rank.value}</span>
+              <input data-rank-value="${rank.value}" value="${escapeHtml(rank.label)}">
+              <span class="edit-pencil">${actionIcon("edit")}</span>
+            </label>
+          `).join("")}
+        </div>
+        <p id="rankSaveMessage" class="muted"></p>
+      </div>
     </section>
 
   `;
@@ -1985,6 +2076,19 @@ function renderIT() {
     syncDevModeAuthStorage();
     renderApp();
   });
+  $("#addRestartTime")?.addEventListener("click", () => saveRestartTimes([...(state.settings.restartTimes || []), $("#restartTimeInput").value]));
+  document.querySelectorAll(".delete-restart-time").forEach((button) => {
+    button.addEventListener("click", () => saveRestartTimes((state.settings.restartTimes || []).filter((time) => time !== button.dataset.time)));
+  });
+}
+
+async function saveRestartTimes(times) {
+  const data = await api("/api/it/restarts", {
+    method: "PATCH",
+    body: JSON.stringify({ restartTimes: Array.from(new Set(times.filter(Boolean))).sort() })
+  });
+  state.settings = data.settings;
+  renderIT();
 }
 
 function openDataImportModal() {
@@ -2302,19 +2406,17 @@ function renderDepartmentPage(department) {
       <div class="department-control-row">
         <div class="tabs-row department-tabs">
           <button class="${tab === "overview" ? "tab-active" : ""}" data-department-tab="overview">\u00dcbersicht</button>
-          <button class="${tab === "members" ? "tab-active" : ""}" data-department-tab="members">Mitglieder</button>
           ${canLeadership ? `<button class="${tab === "leadership" ? "tab-active" : ""}" data-department-tab="leadership">Leitung</button>` : ""}
           ${isTrainingDepartment ? `<button class="${tab === "estExam" ? "tab-active" : ""}" data-department-tab="estExam">EST Prüfung</button>` : ""}
           ${isTrainingDepartment ? `<button class="${tab === "moduleExam" ? "tab-active" : ""}" data-department-tab="moduleExam">Modul Prüfungen</button>` : ""}
         </div>
         ${canInfo ? `<button class="blue-btn vote-btn">${iconSvg("Abteilungen")} Abstimmung</button>` : ""}
       </div>
-      <div class="grid-3 internal-stats">
+      ${tab !== "estExam" ? `<div class="grid-3 internal-stats">
         <div class="stat-card internal-stat-card"><span>Mitglieder</span><i>${iconSvg("Mitglieder")}</i><strong>${department.members.length}</strong><small>Aktive Mitarbeiter</small></div>
         <div class="stat-card internal-stat-card"><span>Leitung / Stv. Leitung</span><i>${iconSvg("Direktion")}</i><strong>${escapeHtml(leaderText === "-" ? "-" : leaders.length)}</strong><small>${escapeHtml(leaderText)}</small></div>
-      </div>
+      </div>` : ""}
       ${tab === "overview" ? renderDepartmentOverviewPanels(department, canMembers, canNotes) : ""}
-      ${tab === "members" ? `<div class="panel department-overview-content"><div class="panel-header"><h3><span class="section-icon">${iconSvg("Mitglieder")}</span>Mitglieder</h3>${canMembers ? `<button class="blue-btn department-add" data-department-id="${escapeHtml(department.id)}">${iconSvg("Mitglieder")} Person hinzuf\u00fcgen</button>` : ""}</div>${renderDepartmentMemberTable(department)}</div>` : ""}
       ${tab === "leadership" && canLeadership ? renderDepartmentLeadershipPanel(department) : ""}
       ${tab === "estExam" && isTrainingDepartment ? renderEstExamPanel(department) : ""}
       ${tab === "moduleExam" && isTrainingDepartment ? renderModuleExamPanel(department) : ""}
@@ -2370,15 +2472,16 @@ function renderDepartmentPage(department) {
   });
   document.querySelectorAll(".training-question-add").forEach((button) => button.addEventListener("click", () => openTrainingQuestionModal(button.dataset.bank, button.dataset.moduleId)));
   document.querySelectorAll(".training-question-edit").forEach((button) => button.addEventListener("click", () => openTrainingQuestionModal(button.dataset.bank, button.dataset.moduleId, button.dataset.questionId)));
-  document.querySelectorAll(".training-question-delete").forEach((button) => button.addEventListener("click", () => deleteTrainingQuestion(button.dataset.bank, button.dataset.moduleId, button.dataset.questionId, department)));
+  document.querySelectorAll(".training-question-delete").forEach((button) => button.addEventListener("click", () => openDeleteTrainingQuestionModal(button.dataset.bank, button.dataset.moduleId, button.dataset.questionId, department)));
   document.querySelectorAll(".training-module-add").forEach((button) => button.addEventListener("click", () => openTrainingModuleModal()));
   document.querySelectorAll(".training-module-edit").forEach((button) => button.addEventListener("click", () => openTrainingModuleModal(button.dataset.moduleId)));
-  document.querySelectorAll(".training-module-delete").forEach((button) => button.addEventListener("click", () => deleteTrainingModule(button.dataset.moduleId, department)));
+  document.querySelectorAll(".training-module-delete").forEach((button) => button.addEventListener("click", () => openDeleteTrainingModuleModal(button.dataset.moduleId, department)));
   document.querySelectorAll(".training-exam-open").forEach((button) => button.addEventListener("click", () => openTrainingExamModal(button.dataset.examId, button.dataset.readonly === "true")));
   document.querySelectorAll(".training-exam-archive").forEach((button) => button.addEventListener("click", () => archiveTrainingExam(button.dataset.examId, department)));
-  document.querySelectorAll(".training-exam-delete").forEach((button) => button.addEventListener("click", () => deleteTrainingExam(button.dataset.examId, department)));
+  document.querySelectorAll(".training-exam-delete").forEach((button) => button.addEventListener("click", () => openDeleteTrainingExamModal(button.dataset.examId, department)));
   document.querySelectorAll(".training-exam-pause").forEach((button) => button.addEventListener("click", () => pauseTrainingExam(button.dataset.examId, department)));
   document.querySelectorAll(".training-exam-stop").forEach((button) => button.addEventListener("click", () => archiveTrainingExam(button.dataset.examId, department)));
+  document.querySelectorAll(".training-est-grant").forEach((button) => button.addEventListener("click", () => grantEstTrainingFromArchive(button.dataset.userId, department)));
   setupExamUserPickers(document);
   document.querySelectorAll(".training-archive-search").forEach((input) => input.addEventListener("input", () => {
     const term = input.value.toLowerCase();
@@ -2434,34 +2537,71 @@ function legacyEstModules() {
 
 const TRAINING_STORE_KEY = "lspd_training_exam_store";
 
+const EST_LOCATION_PROMPTS = [
+  "Würfelpark",
+  "LSPD HQ",
+  "Vespucci Kleidungsladen",
+  "EKZ",
+  "Ententeich",
+  "Alamosee",
+  "Schweinefarm",
+  "Pferderanch",
+  "Casino",
+  "Container Hafen",
+  "Missionrow PD",
+  "Tequilala Bar"
+];
+
 function makeTrainingId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function defaultTrainingQuestion(prompt, type = "manual") {
+async function grantEstTrainingFromArchive(userId, department) {
+  try {
+    await api(`/api/training/est/${userId}`, { method: "POST" });
+    await bootstrap();
+    renderDepartmentPage(department);
+    showNotify("EST Haken vergeben.", "success");
+  } catch (error) {
+    showNotify(error.message, "error");
+  }
+}
+
+function defaultTrainingQuestion(prompt, type = "manual", maxPoints = null) {
+  const resolvedMaxPoints = maxPoints ?? (type === "location" ? 1 : type === "scenario" ? 10 : 3);
   return {
     id: makeTrainingId("question"),
     prompt,
     type,
     solution: type === "manual" ? "Musterlösung für den Prüfer eintragen." : "",
-    correctAnswers: type === "choice" ? ["Richtige Antwort"] : [],
-    wrongAnswers: type === "choice" ? ["Falsche Antwort"] : [],
-    maxPoints: 1
+    answers: type === "choice" ? ["Antwortmöglichkeit"] : [],
+    correctAnswers: [],
+    wrongAnswers: [],
+    image: "",
+    scenarioInfo: "",
+    fileAction: "",
+    stationType: "",
+    targetSeconds: 0,
+    timeSeconds: 0,
+    maxPoints: resolvedMaxPoints
   };
 }
 
 function defaultTrainingStore() {
   return {
     estModules: [
-      { id: "est-law", name: "Rechtskunde", description: "Rechtsfragen und Grundlagen", questions: [defaultTrainingQuestion("Wann darf eine Person durchsucht werden?"), defaultTrainingQuestion("Welche Rechte gelten bei einer Festnahme?", "choice")] },
-      { id: "est-rules", name: "Dienstvorschriften", description: "Interne Regeln und Vorgehen", questions: [defaultTrainingQuestion("Wie wird ein Einsatzbericht dokumentiert?")] },
-      { id: "est-location", name: "Ortskunde", description: "Orte, Wege und Zuständigkeiten", questions: [defaultTrainingQuestion("Welche Route führt zum Vespucci PD?")] }
+      { id: "est-law", name: "Rechtskunde", description: "Rechtsfragen und Grundlagen", phase: 1, questions: [defaultTrainingQuestion("Wann darf eine Person durchsucht werden?", "manual", 3), defaultTrainingQuestion("Welche Rechte gelten bei einer Festnahme?", "manual", 3)] },
+      { id: "est-location", name: "Ortskunde", description: "Orte, Wege und Zuständigkeiten", questions: EST_LOCATION_PROMPTS.map((place) => defaultTrainingQuestion(place, "location")) },
+      { id: "est-scenario", name: "Szenario", description: "10-80 / praktisches Szenario mit Akten-/Prüferinfos", phase: 2, questions: [defaultTrainingQuestion("10-80 Szenario", "scenario", 10)] },
+      { id: "est-rules", name: "Dienstvorschriften", description: "Interne Regeln und Vorgehen", phase: 3, questions: [defaultTrainingQuestion("Wie wird ein Einsatzbericht dokumentiert?", "manual", 3)] },
+      { id: "est-drive", name: "Fahrstrecke", description: "Fahrroute mit Bild und automatischer Zeitwertung", questions: [defaultTrainingQuestion("Fahrstrecke 1", "location", 10)] },
+      { id: "est-heli", name: "Helistrecke", description: "Helikopterroute und Landedächer mit Bild und Zeitwertung", phase: 4, questions: [defaultTrainingQuestion("Helistrecke Route", "location", 10), defaultTrainingQuestion("Dachlandung 1", "location", 10)] }
     ],
     moduleModules: trainings.filter((training) => training !== "EST").slice(0, 6).map((training) => ({
       id: `module-${training.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
       name: training,
       description: "Modulprüfung vorbereiten",
-      questions: [defaultTrainingQuestion(`${training}: Prüffrage eintragen.`)]
+      questions: [defaultTrainingQuestion(`${training}: Prüffrage eintragen.`, "manual", 3)]
     })),
     activeExams: []
   };
@@ -2470,7 +2610,7 @@ function defaultTrainingStore() {
 function trainingStore() {
   try {
     const stored = JSON.parse(localStorage.getItem(TRAINING_STORE_KEY) || "null");
-    if (stored?.estModules?.length) return { ...defaultTrainingStore(), ...stored, activeExams: stored.activeExams || [] };
+    if (stored?.estModules?.length) return normalizeTrainingStore({ ...defaultTrainingStore(), ...stored, activeExams: stored.activeExams || [] });
   } catch {
     return defaultTrainingStore();
   }
@@ -2479,17 +2619,58 @@ function trainingStore() {
   return defaults;
 }
 
+function normalizeTrainingStore(store) {
+  const defaults = defaultTrainingStore();
+  const normalizedQuestionMaxPoints = (module, question) => {
+    if (module.id === "est-location") return 1;
+    if (["est-drive", "est-heli"].includes(module.id)) return Math.min(10, Math.max(1, Number(question.maxPoints || 10)));
+    if (question.type === "scenario" || module.id === "est-scenario") return Math.min(10, Math.max(5, Number(question.maxPoints || 10)));
+    return Math.min(10, Math.max(3, Number(question.maxPoints || 3)));
+  };
+  const mergeModules = (current, fallback) => {
+    const modules = [...(current || [])];
+    fallback.forEach((module) => {
+      if (!modules.some((item) => item.id === module.id || item.name === module.name)) modules.push(module);
+    });
+    return modules.map((module) => ({
+      ...module,
+      questions: (module.questions || []).map((question) => ({
+        ...question,
+        answers: Array.isArray(question.answers) ? question.answers : [...(question.correctAnswers || []), ...(question.wrongAnswers || [])].filter(Boolean),
+        correctAnswers: [],
+        wrongAnswers: [],
+        image: question.image || "",
+        scenarioInfo: question.scenarioInfo || "",
+        fileAction: question.fileAction || "",
+        stationType: question.stationType || (module.id === "est-heli" && /dach|landung|combat/i.test(question.prompt || "") ? "combat" : module.id === "est-heli" ? "route" : ""),
+        targetSeconds: Number(question.targetSeconds || 0),
+        timeSeconds: Number(question.timeSeconds || 0),
+        maxPoints: normalizedQuestionMaxPoints(module, question),
+        penaltyPoints: 0,
+        questionPenalty: false
+      }))
+    }));
+  };
+  return {
+    ...defaults,
+    ...store,
+    estModules: mergeModules(store.estModules, defaults.estModules),
+    moduleModules: mergeModules(store.moduleModules, defaults.moduleModules),
+    activeExams: store.activeExams || []
+  };
+}
+
 function saveTrainingStore(store) {
   localStorage.setItem(TRAINING_STORE_KEY, JSON.stringify(store));
 }
 
 function activeEstExam() {
-  return trainingStore().activeExams.find((exam) => exam.kind === "est" && !["Abgeschlossen", "Archiviert"].includes(exam.status));
+  return trainingStore().activeExams.find((exam) => exam.kind === "est" && !["Vorbereitung", "Abgeschlossen", "Archiviert"].includes(exam.status));
 }
 
 function activeExamItems(kind) {
   return trainingStore().activeExams
-    .filter((exam) => exam.kind === kind && !["Abgeschlossen", "Archiviert"].includes(exam.status))
+    .filter((exam) => exam.kind === kind && !["Vorbereitung", "Abgeschlossen", "Archiviert"].includes(exam.status))
     .sort((a, b) => new Date(b.createdAt || b.startedAt || 0) - new Date(a.createdAt || a.startedAt || 0));
 }
 
@@ -2645,9 +2826,12 @@ function renderTrainingExamArchiveRow(exam, canManageArchive) {
   const candidate = state.users.find((user) => user.id === exam.candidateId);
   const examiner = state.users.find((user) => user.id === exam.examinerId);
   const secondExaminer = state.users.find((user) => user.id === exam.secondExaminerId);
-  const result = exam.finalResult ? `${exam.finalResult.percent}% · ${exam.finalResult.points}/${exam.finalResult.total} Punkte` : "Ohne finale Auswertung";
+  const percent = Number(exam.finalResult?.percent || 0);
+  const passed = Boolean(exam.finalResult) && percent >= 70;
+  const alreadyHasEst = Boolean(candidate?.trainings?.EST);
+  const result = exam.finalResult ? `${passed ? "Bestanden" : "Nicht bestanden"} · ${percent}% · ${exam.finalResult.points}/${exam.finalResult.total} Punkte` : "Ohne finale Auswertung";
   return `
-    <article class="training-archive-row">
+    <article class="training-archive-row ${exam.kind === "est" && exam.finalResult ? passed ? "exam-passed" : "exam-failed" : ""}">
       <div>
         <strong>${escapeHtml(candidate ? fullName(candidate) : "Unbekannter Prüfling")}</strong>
         <small>${exam.kind === "est" ? "EST Prüfung" : "Modul Prüfung"} · ${escapeHtml(exam.status)} · ${formatDateTime(exam.archivedAt || exam.startedAt)}</small>
@@ -2656,6 +2840,8 @@ function renderTrainingExamArchiveRow(exam, canManageArchive) {
       <span><b>Ergebnis</b>${escapeHtml(result)}</span>
       <div class="button-row">
         <button class="blue-btn training-exam-open" data-exam-id="${escapeHtml(exam.id)}" data-readonly="true" type="button">Verlauf öffnen</button>
+        ${exam.kind === "est" && passed && candidate && !alreadyHasEst && canManageArchive ? `<button class="green-btn training-est-grant" data-user-id="${escapeHtml(candidate.id)}" type="button">EST Haken vergeben</button>` : ""}
+        ${exam.kind === "est" && alreadyHasEst ? `<span class="requirement-chip ok">EST vergeben</span>` : ""}
         ${canManageArchive ? `<button class="mini-icon danger training-exam-delete" data-exam-id="${escapeHtml(exam.id)}" type="button" title="Archiv löschen">${actionIcon("delete")}</button>` : ""}
       </div>
     </article>
@@ -2966,7 +3152,7 @@ function renderTrainingManagementPanels() {
   return `
     <section class="training-management-grid">
       <article class="panel training-manage-card">
-        <div class="panel-header"><div><h3>EST Verwaltung</h3><p class="muted">Fragenpool für Rechtskunde, Dienstvorschriften und Ortskunde.</p></div></div>
+        <div class="panel-header"><div><h3>EST Verwaltung</h3><p class="muted">Fragenpool für Rechtskunde, Dienstvorschriften, Ortskunde, Helistrecke, Fahrstrecke und Szenario.</p></div></div>
         <div class="exam-module-grid">
           ${store.estModules.map((module) => renderTrainingModuleAdmin("est", module, false)).join("")}
         </div>
@@ -2994,7 +3180,7 @@ function renderTrainingModuleAdmin(bank, module, editableModule) {
       <div class="training-question-admin-list">
         ${module.questions.length ? module.questions.map((question) => `
           <div class="training-question-admin-row">
-            <span><b>${escapeHtml(question.prompt)}</b><small>${question.type === "choice" ? "Antwortauswahl" : "Musterlösung"} · max. ${escapeHtml(question.maxPoints)} Punkte</small></span>
+            <span><b>${escapeHtml(question.prompt)}</b><small>${question.type === "location" ? question.stationType === "combat" ? "Combat-Landung / Ort" : module.id === "est-location" ? "Ort" : "Strecke" : question.type === "scenario" ? "Szenario" : "Musterlösung"} · max. ${escapeHtml(question.maxPoints)} Punkt</small></span>
             <button class="mini-icon training-question-edit" data-bank="${bank}" data-module-id="${escapeHtml(module.id)}" data-question-id="${escapeHtml(question.id)}" type="button">${actionIcon("edit")}</button>
             <button class="mini-icon danger training-question-delete" data-bank="${bank}" data-module-id="${escapeHtml(module.id)}" data-question-id="${escapeHtml(question.id)}" type="button">${actionIcon("delete")}</button>
           </div>
@@ -3014,21 +3200,41 @@ function openTrainingQuestionModal(bank, moduleId, questionId = null) {
   const module = findTrainingModule(store, bank, moduleId);
   const question = module?.questions.find((item) => item.id === questionId);
   if (!module) return;
+  const moduleName = cleanText(module.name || "");
+  const isOrtskunde = /ortskunde/i.test(moduleName) || module.id === "est-location";
+  const isFahrstrecke = /fahrstrecke/i.test(moduleName) || module.id === "est-drive";
+  const isHelistrecke = /helistrecke/i.test(moduleName) || module.id === "est-heli";
+  const imageEnabled = isOrtskunde || isFahrstrecke || isHelistrecke || question?.type === "location";
+  const scenarioEnabled = /szenario/i.test(moduleName) || question?.type === "scenario";
+  const defaultType = imageEnabled ? "location" : scenarioEnabled ? "scenario" : "manual";
+  const isTimedRoute = isFahrstrecke || isHelistrecke;
+  const stationType = question?.stationType || (isHelistrecke && /dach|landung|combat/i.test(question?.prompt || "") ? "combat" : "route");
+  const typeLabel = isOrtskunde ? "Ortskunde · Ort mit Bild · max. 1 Punkt" : isFahrstrecke ? "Fahrstrecke · Strecke mit Sollzeit" : isHelistrecke ? "Helistrecke · Route oder Combat-Landung" : scenarioEnabled ? "Szenario" : "Frage mit Musterlösung";
+  const promptLabel = isOrtskunde ? "Ort" : isFahrstrecke ? "Strecke" : isHelistrecke ? "Strecke / Combat-Landung" : "Frage";
+  const maxPointsValue = isOrtskunde ? 1 : Math.min(10, Number(question?.maxPoints || (isTimedRoute || scenarioEnabled ? 10 : 3)));
   openModal(`
     <h3>${question ? "Frage bearbeiten" : "Frage erstellen"}</h3>
     <p class="muted">${escapeHtml(module.name)}</p>
-    <form id="trainingQuestionForm" class="form-grid">
-      <label class="full">Frage<textarea name="prompt" required>${escapeHtml(question?.prompt || "")}</textarea></label>
-      <label>Fragentyp
-        <select name="type" id="trainingQuestionType">
-          <option value="manual" ${question?.type !== "choice" ? "selected" : ""}>Musterlösung / manuelle Bewertung</option>
-          <option value="choice" ${question?.type === "choice" ? "selected" : ""}>Antwortauswahl / automatisch</option>
-        </select>
-      </label>
-      <label>Max. Punkte<input name="maxPoints" type="number" min="0.5" max="2" step="0.5" value="${escapeHtml(question?.maxPoints || 1)}"></label>
-      <label class="full manual-question-fields">Musterlösung für Prüfer<textarea name="solution" placeholder="Wird dem Prüfer während der Prüfung angezeigt.">${escapeHtml(question?.solution || "")}</textarea></label>
-      <label class="full choice-question-fields">Richtige Antworten<textarea name="correctAnswers" placeholder="Eine Antwort pro Zeile">${escapeHtml((question?.correctAnswers || []).join("\n"))}</textarea></label>
-      <label class="full choice-question-fields">Falsche / fehlende Antworten<textarea name="wrongAnswers" placeholder="Eine Antwort pro Zeile">${escapeHtml((question?.wrongAnswers || []).join("\n"))}</textarea></label>
+    <form id="trainingQuestionForm" class="form-grid training-question-form">
+      <label class="full">${escapeHtml(promptLabel)}<textarea name="prompt" required>${escapeHtml(question?.prompt || "")}</textarea></label>
+      <input type="hidden" name="type" id="trainingQuestionType" value="${escapeHtml(defaultType)}">
+      <div class="question-type-display"><span>Fragentyp</span><strong>${escapeHtml(typeLabel)}</strong></div>
+      ${isOrtskunde ? `<input type="hidden" name="maxPoints" value="1">` : `<label>Max. Punkte<input name="maxPoints" type="number" min="0.5" max="10" step="0.5" value="${escapeHtml(maxPointsValue)}"></label>`}
+      ${isHelistrecke ? `<label>Heli-Eintrag<select name="stationType"><option value="route" ${stationType === "route" ? "selected" : ""}>Strecke</option><option value="combat" ${stationType === "combat" ? "selected" : ""}>Combat-Landung / Ort</option></select></label>` : `<input type="hidden" name="stationType" value="">`}
+      ${!imageEnabled ? `<label class="full manual-question-fields scenario-question-fields">Musterlösung / Prüferinfo<textarea name="solution" placeholder="Wird dem Prüfer während der Prüfung angezeigt.">${escapeHtml(question?.solution || "")}</textarea></label>` : `<input type="hidden" name="solution" value="${escapeHtml(question?.solution || "")}">`}
+      <textarea name="answers" class="hidden">${escapeHtml((question?.answers || question?.correctAnswers || []).join("\n"))}</textarea>
+      ${scenarioEnabled ? `<label class="full scenario-question-fields scenario-big-field">Szenario Ablauf / Prüferinfos<textarea name="scenarioInfo" placeholder="Beschreibe das Szenario ausführlich: Lage, Ablauf, erwartetes Verhalten, Hinweise für Prüfer...">${escapeHtml(question?.scenarioInfo || "")}</textarea></label><label class="full scenario-question-fields">Akte / Maßnahme<textarea name="fileAction" placeholder="Welche Akte, Maßnahme oder Sanktion soll vergeben werden?">${escapeHtml(question?.fileAction || "")}</textarea></label>` : `<textarea name="scenarioInfo" class="hidden">${escapeHtml(question?.scenarioInfo || "")}</textarea><textarea name="fileAction" class="hidden">${escapeHtml(question?.fileAction || "")}</textarea>`}
+      ${isTimedRoute ? `<label class="image-question-fields">Sollzeit<input name="targetSeconds" value="${escapeHtml(formatSecondsInput(question?.targetSeconds || 0))}" placeholder="MM:SS oder Sekunden"></label>` : `<input type="hidden" name="targetSeconds" value="">`}
+      ${imageEnabled ? `<div class="full image-upload-card">
+        <label class="image-upload-drop" id="trainingQuestionImageDrop" title="Bild hochladen">
+          <input id="trainingQuestionImage" type="file" accept="image/*">
+          <span class="upload-icon">${iconSvg("Plus")}</span>
+          <strong>Bild hochladen</strong>
+          <small>Drag & Drop oder klicken</small>
+        </label>
+        <input name="image" type="hidden" value="${escapeHtml(question?.image || "")}">
+        <div class="question-image-preview">${question?.image ? `<img src="${escapeHtml(question.image)}" alt="">` : `<span class="muted">Noch kein Bild hinterlegt.</span>`}</div>
+      </div>` : `<input name="image" type="hidden" value="${escapeHtml(question?.image || "")}">`}
       <p id="modalError" class="form-error full"></p>
       <div class="modal-actions full">
         <button class="ghost-btn" type="button" data-close>Abbrechen</button>
@@ -3036,13 +3242,26 @@ function openTrainingQuestionModal(bank, moduleId, questionId = null) {
       </div>
     </form>
   `, (modal) => {
-    const syncType = () => {
-      const isChoice = modal.querySelector("#trainingQuestionType").value === "choice";
-      modal.querySelectorAll(".choice-question-fields").forEach((item) => item.classList.toggle("hidden", !isChoice));
-      modal.querySelectorAll(".manual-question-fields").forEach((item) => item.classList.toggle("hidden", isChoice));
+    const handleQuestionImageFile = async (file) => {
+      if (!file) return;
+      const dataUrl = await readImageFileAsDataUrl(file);
+      modal.querySelector("[name='image']").value = dataUrl;
+      modal.querySelector(".question-image-preview").innerHTML = `<img src="${escapeHtml(dataUrl)}" alt="">`;
     };
-    modal.querySelector("#trainingQuestionType").addEventListener("change", syncType);
-    syncType();
+    modal.querySelector("#trainingQuestionImage")?.addEventListener("change", async (event) => {
+      await handleQuestionImageFile(event.target.files?.[0]);
+    });
+    const imageDrop = modal.querySelector("#trainingQuestionImageDrop");
+    imageDrop?.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      imageDrop.classList.add("drag-over");
+    });
+    imageDrop?.addEventListener("dragleave", () => imageDrop.classList.remove("drag-over"));
+    imageDrop?.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      imageDrop.classList.remove("drag-over");
+      await handleQuestionImageFile(event.dataTransfer?.files?.[0]);
+    });
     modal.querySelector("#trainingQuestionForm").addEventListener("submit", (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
@@ -3052,9 +3271,16 @@ function openTrainingQuestionModal(bank, moduleId, questionId = null) {
         prompt: String(form.get("prompt") || "").trim(),
         type,
         solution: String(form.get("solution") || "").trim(),
-        correctAnswers: String(form.get("correctAnswers") || "").split("\n").map((item) => item.trim()).filter(Boolean),
-        wrongAnswers: String(form.get("wrongAnswers") || "").split("\n").map((item) => item.trim()).filter(Boolean),
-        maxPoints: Math.min(2, Math.max(0.5, Number(form.get("maxPoints") || 1)))
+        answers: String(form.get("answers") || "").split("\n").map((item) => item.trim()).filter(Boolean),
+        correctAnswers: [],
+        wrongAnswers: [],
+        image: String(form.get("image") || "").trim(),
+        scenarioInfo: String(form.get("scenarioInfo") || "").trim(),
+        fileAction: String(form.get("fileAction") || "").trim(),
+        stationType: String(form.get("stationType") || "").trim(),
+        targetSeconds: isTimedRoute ? secondsFromTimeInput(form.get("targetSeconds")) : 0,
+        timeSeconds: Number(question?.timeSeconds || 0),
+        maxPoints: isOrtskunde ? 1 : Math.min(10, Math.max(0.5, Number(form.get("maxPoints") || 1)))
       };
       if (!nextQuestion.prompt) {
         modal.querySelector("#modalError").textContent = "Bitte eine Frage eintragen.";
@@ -3075,6 +3301,32 @@ function deleteTrainingQuestion(bank, moduleId, questionId, department) {
   module.questions = module.questions.filter((question) => question.id !== questionId);
   saveTrainingStore(store);
   renderDepartmentPage(department);
+  showNotify("Frage gelöscht.", "danger");
+}
+
+function openDeleteTrainingQuestionModal(bank, moduleId, questionId, department) {
+  const store = trainingStore();
+  const module = findTrainingModule(store, bank, moduleId);
+  const question = module?.questions.find((item) => item.id === questionId);
+  openConfirmModal({
+    title: "Frage löschen",
+    text: `${question?.prompt || "Diese Frage"} wirklich dauerhaft löschen?`,
+    confirmText: "Frage löschen",
+    onConfirm: () => deleteTrainingQuestion(bank, moduleId, questionId, department)
+  });
+}
+
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("Bitte eine Bilddatei auswählen."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Bild konnte nicht gelesen werden."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function openTrainingModuleModal(moduleId = null) {
@@ -3118,6 +3370,18 @@ function deleteTrainingModule(moduleId, department) {
   store.moduleModules = store.moduleModules.filter((module) => module.id !== moduleId);
   saveTrainingStore(store);
   renderDepartmentPage(department);
+  showNotify("Modul gelöscht.", "danger");
+}
+
+function openDeleteTrainingModuleModal(moduleId, department) {
+  const store = trainingStore();
+  const module = store.moduleModules.find((item) => item.id === moduleId);
+  openConfirmModal({
+    title: "Modul löschen",
+    text: `${module?.name || "Dieses Modul"} wirklich dauerhaft löschen?`,
+    confirmText: "Modul löschen",
+    onConfirm: () => deleteTrainingModule(moduleId, department)
+  });
 }
 
 function archiveTrainingExam(examId, department) {
@@ -3128,6 +3392,7 @@ function archiveTrainingExam(examId, department) {
   exam.archivedAt = new Date().toISOString();
   saveTrainingStore(store);
   renderDepartmentPage(department);
+  showNotify("Prüfung archiviert.", "success");
 }
 
 function pauseTrainingExam(examId, department) {
@@ -3144,6 +3409,19 @@ function deleteTrainingExam(examId, department) {
   store.activeExams = store.activeExams.filter((exam) => exam.id !== examId);
   saveTrainingStore(store);
   renderDepartmentPage(department);
+  showNotify("Prüfung gelöscht.", "danger");
+}
+
+function openDeleteTrainingExamModal(examId, department) {
+  const store = trainingStore();
+  const exam = store.activeExams.find((item) => item.id === examId);
+  const candidate = state.users.find((user) => user.id === exam?.candidateId);
+  openConfirmModal({
+    title: "Prüfung löschen",
+    text: `${candidate ? fullName(candidate) : "Diese Prüfung"} wirklich dauerhaft löschen?`,
+    confirmText: "Prüfung löschen",
+    onConfirm: () => deleteTrainingExam(examId, department)
+  });
 }
 
 function examProgressText(exam) {
@@ -3795,27 +4073,25 @@ function openTrainingExamModal(examId, readOnly = false) {
   });
 }
 
-const EST_LOCATION_PROMPTS = [
-  "Würfelpark",
-  "LSPD HQ",
-  "Vespucci Kleidungsladen",
-  "EKZ",
-  "Ententeich",
-  "Alamosee",
-  "Schweinefarm",
-  "Pferderanch",
-  "Casino",
-  "Container Hafen",
-  "Missionrow PD",
-  "Tequilala Bar"
-];
-
 function shuffledItems(items) {
   return [...items].sort(() => Math.random() - 0.5);
 }
 
 function isEstLocationModule(module) {
-  return /ortskunde/i.test(cleanText(module?.name || "")) || module?.id === "est-location";
+  return /ortskunde|fahrstrecke/i.test(cleanText(module?.name || "")) || ["est-location", "est-drive"].includes(module?.id);
+}
+
+function isLocationQuestion(question, side = "main") {
+  return side === "location" || question?.type === "location";
+}
+
+function orderedEstModules(modules = []) {
+  const order = ["est-law", "est-location", "est-scenario", "est-rules", "est-drive", "est-heli"];
+  return [...modules].sort((a, b) => {
+    const ai = order.indexOf(a.id);
+    const bi = order.indexOf(b.id);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
 }
 
 function createTrainingExam(kind, candidateId, secondExaminerId, modules) {
@@ -3833,12 +4109,13 @@ function createTrainingExam(kind, candidateId, secondExaminerId, modules) {
     createdAt: new Date().toISOString(),
     startedAt: null,
     activeMainModuleId: "",
-    modules: modules.map((module) => ({
+    modules: (kind === "est" ? orderedEstModules(modules) : modules).map((module) => ({
       id: module.id,
       name: module.name,
       description: module.description,
+      phase: module.phase || 0,
       status: "Offen",
-      questions: module.questions.map((question) => ({ ...question, result: null, traineeAnswer: "", selectedCorrect: [], selectedWrong: [], selectedAnswers: [], manualPoints: 0, questionPenalty: false, skipped: false }))
+      questions: module.questions.map((question) => ({ ...question, result: null, traineeAnswer: "", selectedCorrect: [], selectedWrong: [], selectedAnswers: [], manualPoints: 0, stationType: question.stationType || "", timeSeconds: Number(question.timeSeconds || 0), targetSeconds: Number(question.targetSeconds || 0), questionPenalty: false, penaltyPoints: 0, skipped: false }))
     }))
   };
   if (kind === "est") prepareEstExamModules(exam);
@@ -3847,23 +4124,26 @@ function createTrainingExam(kind, candidateId, secondExaminerId, modules) {
 
 function prepareEstExamModules(exam) {
   if (!exam || exam.kind !== "est" || exam.locationRandomized) return exam;
-  const locationModule = exam.modules.find(isEstLocationModule);
-  if (locationModule) {
-    locationModule.questions = shuffledItems(EST_LOCATION_PROMPTS).map((place) => ({
-      id: makeTrainingId("location"),
-      prompt: place,
+  exam.modules.filter((module) => isEstLocationModule(module) || module.id === "est-heli").forEach((sideModule) => {
+    if (!sideModule.questions?.length && sideModule.id === "est-location") {
+      sideModule.questions = EST_LOCATION_PROMPTS.map((place) => defaultTrainingQuestion(place, "location"));
+    }
+    const timed = ["est-drive", "est-heli"].includes(sideModule.id);
+    sideModule.questions = shuffledItems(sideModule.questions || []).map((question) => ({
+      ...question,
       type: "location",
-      solution: "",
-      correctAnswers: [],
-      wrongAnswers: [],
-      maxPoints: 1,
-      manualPoints: 0,
+      stationType: question.stationType || (sideModule.id === "est-heli" && /dach|landung|combat/i.test(question.prompt || "") ? "combat" : sideModule.id === "est-heli" ? "route" : ""),
+      maxPoints: timed ? Number(question.maxPoints || 10) : 1,
+      targetSeconds: Number(question.targetSeconds || 0),
+      timeSeconds: Number(question.timeSeconds || 0),
+      manualPoints: Number(question.manualPoints || 0),
       traineeAnswer: "",
       selectedAnswers: [],
       questionPenalty: false,
+      penaltyPoints: 0,
       skipped: false
     }));
-  }
+  });
   exam.locationRandomized = true;
   return exam;
 }
@@ -3886,11 +4166,15 @@ function ensureExamModuleState(exam) {
       if (!Array.isArray(question.selectedAnswers)) {
         question.selectedAnswers = [...(question.selectedCorrect || []), ...(question.selectedWrong || [])];
       }
-      question.questionPenalty = Boolean(question.questionPenalty);
+      question.questionPenalty = false;
+      question.penaltyPoints = 0;
       question.skipped = Boolean(question.skipped);
       question.traineeAnswer = question.traineeAnswer || "";
       question.manualPoints = Number(question.manualPoints ?? question.result?.points ?? 0);
-      if (question.type === "location") question.maxPoints = 1;
+      if (module.id === "est-location") question.maxPoints = 1;
+      else if (["est-drive", "est-heli"].includes(module.id)) question.maxPoints = Math.min(10, Math.max(1, Number(question.maxPoints || 10)));
+      else if (question.type === "scenario" || module.id === "est-scenario") question.maxPoints = Math.min(10, Math.max(5, Number(question.maxPoints || 10)));
+      else question.maxPoints = Math.min(10, Math.max(3, Number(question.maxPoints || 3)));
     });
   });
   if (exam.kind === "est" && !exam.activeMainModuleId) {
@@ -3903,6 +4187,20 @@ function ensureExamModuleState(exam) {
 function estLocationModule(exam) {
   ensureExamModuleState(exam);
   return exam.modules.find(isEstLocationModule) || null;
+}
+
+function estSideModules(exam) {
+  ensureExamModuleState(exam);
+  return exam.modules.filter(isEstLocationModule);
+}
+
+function estSideModulesForMain(exam, mainModule = currentManagedExamModule(exam)) {
+  ensureExamModuleState(exam);
+  const map = {
+    "est-law": ["est-location"],
+    "est-rules": ["est-drive"]
+  };
+  return exam.modules.filter((module) => (map[mainModule?.id] || []).includes(module.id));
 }
 
 function estMainModules(exam) {
@@ -3949,27 +4247,55 @@ function normalizeChoiceAnswers(question) {
 
 function scoreChoiceQuestion(question) {
   if (question.skipped) return 0;
+  return Math.max(0, Math.min(Number(question.maxPoints || 1), Number(question.manualPoints || 0)));
+}
+
+function scoreOptionsForQuestion(question, locationSide = false) {
   const maxPoints = Number(question.maxPoints || 1);
-  const correctAnswers = question.correctAnswers || [];
-  const selectedAnswers = question.selectedAnswers || [];
-  const hits = correctAnswers.filter((answer) => selectedAnswers.includes(answer)).length;
-  const base = correctAnswers.length ? (hits / correctAnswers.length) * maxPoints : 0;
-  const penalty = Number(question.penaltyPoints ?? (question.questionPenalty ? 1 : 0));
-  const points = Math.round((base - penalty) * 2) / 2;
-  return Math.max(-1, Math.min(maxPoints, points));
+  const step = locationSide && maxPoints <= 1 ? 0.5 : 0.5;
+  const values = [];
+  for (let value = 0; value <= maxPoints + 0.001; value += step) {
+    values.push(Math.round(value * 10) / 10);
+  }
+  return values;
+}
+
+function timedQuestionPoints(question) {
+  const target = Number(question.targetSeconds || 0);
+  const actual = Number(question.timeSeconds || 0);
+  const max = Number(question.maxPoints || 10);
+  if (!target || !actual) return Number(question.manualPoints || 0);
+  if (actual <= target) return max;
+  const overRatio = (actual - target) / target;
+  return Math.max(0, Math.round((max * Math.max(0, 1 - overRatio)) * 10) / 10);
+}
+
+function formatSecondsInput(seconds) {
+  const value = Number(seconds || 0);
+  if (!value) return "";
+  const minutes = Math.floor(value / 60);
+  const rest = value % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+function secondsFromTimeInput(value) {
+  const text = String(value || "").trim();
+  if (!text) return 0;
+  if (!text.includes(":")) return Number(text) || 0;
+  const [minutes, seconds] = text.split(":").map((part) => Number(part) || 0);
+  return minutes * 60 + seconds;
 }
 
 function renderEstExamPanel(department) {
-  const store = trainingStore();
   const candidates = state.users.filter((user) => !user.trainings?.EST);
   return `
-    <div class="training-exam-layout department-overview-content">
+    <div class="training-exam-layout department-overview-content est-dashboard">
       ${renderActiveTrainingExams("est", department)}
-      <section class="panel training-exam-card compact-est-start">
-        <div class="panel-header"><div><h3>EST Prüfung erstellen</h3><p class="muted">Prüfling auswählen, Prüfung anlegen und anschließend das Startmodul im Prüfungsfenster wählen.</p></div></div>
-        <div class="exam-start-grid compact">
+      <section class="panel training-exam-card compact-est-start est-create-panel">
+        <div class="panel-header"><div><h3>EST Prüfung starten</h3><p class="muted">Prüfling auswählen und die Prüfung vorbereiten.</p></div></div>
+        <div class="est-create-box">
           <label>Prüfling ohne EST ${renderExamUserPicker("estCandidateInput", "estCandidateList", candidates, "Prüfling suchen und auswählen")}</label>
-          <button class="blue-btn" id="startEstExam" type="button">EST Prüfung anlegen</button>
+          <button class="blue-btn" id="startEstExam" type="button">Prüfung vorbereiten</button>
         </div>
       </section>
       ${renderTrainingExamArchive("est", department)}
@@ -3985,34 +4311,38 @@ function estCompletedExamItems() {
 
 function activeExamItems(kind) {
   return trainingStore().activeExams
-    .filter((exam) => exam.kind === kind && !["Abgeschlossen", "Archiviert"].includes(exam.status))
+    .filter((exam) => exam.kind === kind && !["Vorbereitung", "Abgeschlossen", "Archiviert"].includes(exam.status))
     .sort((a, b) => new Date(b.createdAt || b.startedAt || 0) - new Date(a.createdAt || a.startedAt || 0));
 }
 
 function examArchiveItems(kind) {
   return trainingStore().activeExams
-    .filter((exam) => exam.kind === kind && exam.status === "Archiviert")
+    .filter((exam) => exam.kind === kind && ["Archiviert", "Abgeschlossen"].includes(exam.status))
     .sort((a, b) => new Date(b.archivedAt || b.startedAt || 0) - new Date(a.archivedAt || a.startedAt || 0));
 }
 
 function renderActiveTrainingExams(kind, department) {
   const activeRows = activeExamItems(kind);
-  const completedRows = kind === "est" ? estCompletedExamItems() : [];
   const canManage = departmentActionAllowed(department, "departmentLeadership");
   return `
     <section class="panel training-active-card">
-      <div class="panel-header"><div><h3>Aktive Prüfungen</h3><p class="muted">${activeRows.length} begonnene oder vorbereitete Prüfungen</p></div></div>
-      <div class="training-archive-list">
+      <div class="panel-header"><div><h3>Aktive Prüfungen</h3><p class="muted">${activeRows.length} gestartete oder pausierte Prüfungen</p></div></div>
+      <div class="training-active-grid">
         ${activeRows.length ? activeRows.map((exam) => renderActiveTrainingExamRow(exam, canManage)).join("") : `<p class="muted">Keine aktive Prüfung vorhanden.</p>`}
       </div>
-      ${kind === "est" ? `
-        <div class="training-completed-split">
-          <div class="panel-header slim"><div><h3>Abgeschlossen</h3><p class="muted">${completedRows.length} fertig ausgewertete EST Prüfungen</p></div></div>
-          <div class="training-archive-list">
-            ${completedRows.length ? completedRows.map((exam) => renderCompletedTrainingExamRow(exam, canManage)).join("") : `<p class="muted">Noch keine abgeschlossene EST Prüfung.</p>`}
-          </div>
-        </div>
-      ` : ""}
+    </section>
+  `;
+}
+
+function renderCompletedTrainingExams(department) {
+  const completedRows = estCompletedExamItems();
+  const canManage = departmentActionAllowed(department, "departmentLeadership");
+  return `
+    <section class="panel training-completed-card">
+      <div class="panel-header"><div><h3>Abgeschlossene EST Prüfungen</h3><p class="muted">${completedRows.length} fertig ausgewertete Prüfungen</p></div></div>
+      <div class="training-archive-list">
+        ${completedRows.length ? completedRows.map((exam) => renderCompletedTrainingExamRow(exam, canManage)).join("") : `<p class="muted">Noch keine abgeschlossene EST Prüfung.</p>`}
+      </div>
     </section>
   `;
 }
@@ -4021,17 +4351,30 @@ function renderActiveTrainingExamRow(exam, canManage) {
   ensureExamModuleState(exam);
   const candidate = state.users.find((user) => user.id === exam.candidateId);
   const examiner = state.users.find((user) => user.id === exam.examinerId);
+  const activeModule = currentManagedExamModule(exam);
+  const completedCount = exam.modules.filter((module) => module.status === "Abgeschlossen").length;
+  const moduleBadges = exam.modules.map((module) => {
+    const tone = module.status === "Abgeschlossen" ? examModuleTone(module) : module.id === activeModule?.id ? "active" : "";
+    return `<span class="training-module-pill ${tone}"><b>${escapeHtml(module.name)}</b><small>${escapeHtml(module.status || "Offen")}${module.result ? ` · ${escapeHtml(module.result.percent)}%` : ""}</small></span>`;
+  }).join("");
   return `
-    <article class="training-archive-row">
-      <div>
-        <strong>${escapeHtml(candidate ? fullName(candidate) : "Unbekannter Prüfling")}</strong>
-        <small>${exam.kind === "est" ? "EST Prüfung" : "Modul Prüfung"} · ${escapeHtml(exam.status)} · ${escapeHtml(examProgressText(exam))}</small>
+    <article class="training-active-exam-card">
+      <div class="training-active-head">
+        <div>
+          <strong>${escapeHtml(candidate ? fullName(candidate) : "Unbekannter Prüfling")}</strong>
+          <small>${exam.kind === "est" ? "EST Prüfung" : "Modul Prüfung"} · ${escapeHtml(exam.status)} · ${completedCount}/${exam.modules.length} Module</small>
+        </div>
+        <span class="status-pill ${exam.status === "Pausiert" ? "warn" : exam.status === "Modul bereit" ? "success" : ""}">${escapeHtml(exam.status)}</span>
       </div>
-      <span><b>Prüfer</b>${escapeHtml(examiner ? fullName(examiner) : "-")}</span>
-      <span><b>Dauer</b><span class="exam-live-timer" data-started-at="${escapeHtml(exam.startedAt || "")}">${escapeHtml(examElapsedText(exam))}</span></span>
-      <div class="button-row">
-        <button class="blue-btn training-exam-open" data-exam-id="${escapeHtml(exam.id)}" type="button">Öffnen</button>
-        <button class="ghost-btn training-exam-pause" data-exam-id="${escapeHtml(exam.id)}" type="button">Pausieren</button>
+      <div class="training-active-meta">
+        <span><b>Prüfer</b>${escapeHtml(examiner ? fullName(examiner) : "-")}</span>
+        <span><b>Dauer</b><span class="exam-live-timer" data-started-at="${escapeHtml(exam.startedAt || "")}">${escapeHtml(examElapsedText(exam))}</span></span>
+        <span><b>Aktuelles Modul</b>${escapeHtml(activeModule?.name || "Noch nicht gewählt")}</span>
+      </div>
+      <div class="training-module-pill-row">${moduleBadges}</div>
+      <div class="training-active-actions">
+        <button class="blue-btn training-exam-open" data-exam-id="${escapeHtml(exam.id)}" type="button">${exam.status === "Modul bereit" ? "Nächstes Modul starten" : "Öffnen"}</button>
+        <button class="ghost-btn training-exam-pause" data-exam-id="${escapeHtml(exam.id)}" type="button">${exam.status === "Pausiert" ? "Fortsetzen" : "Pausieren"}</button>
         ${canManage ? `<button class="mini-icon danger training-exam-delete" data-exam-id="${escapeHtml(exam.id)}" type="button" title="Löschen">${actionIcon("delete")}</button>` : ""}
       </div>
     </article>
@@ -4143,13 +4486,25 @@ function renderExamModuleStepper(exam) {
 
 function renderCatalogQuestion(question, index, side = "main") {
   const maxPoints = Number(question.maxPoints || 1);
-  const scoreValues = side === "location" ? [0, 0.5, 1] : [0, 0.5, 1, 1.5, 2].filter((value) => value <= maxPoints);
+  const scoreValues = isLocationQuestion(question, side) ? [0, 0.5, 1] : [0, 0.5, 1, 1.5, 2].filter((value) => value <= maxPoints);
   const scoreClass = (value) => `score-select score-${String(value || 0).replace(".", "-")}`;
   const scoreBlock = (html) => `<div class="question-score-row"><span>Bewertung</span>${html}</div>`;
-  if (side === "location" || question.type === "location") {
+  if (isLocationQuestion(question, side)) {
     return `
       <article class="exam-catalog-question location-question" data-question-id="${escapeHtml(question.id)}">
-        <div class="catalog-question-body"><div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>Ortskunde</small></div>${question.image ? `<img class="location-question-image" src="${escapeHtml(question.image)}" alt="">` : ""}</div>
+        <div class="catalog-question-body"><div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>Praxis</small></div>${question.image ? `<img class="location-question-image" src="${escapeHtml(question.image)}" alt="">` : ""}${question.targetSeconds ? `<label>Sollzeit<input data-exam-target="${escapeHtml(question.id)}" value="${escapeHtml(formatSecondsInput(question.targetSeconds))}" placeholder="MM:SS"></label><label>Gefahrene Zeit<input data-exam-time="${escapeHtml(question.id)}" value="${escapeHtml(formatSecondsInput(question.timeSeconds || 0))}" placeholder="MM:SS"></label>` : ""}</div>
+        ${scoreBlock(`<select class="${scoreClass(question.manualPoints)}" data-exam-score="${escapeHtml(question.id)}">${scoreValues.map((value) => `<option value="${value}" ${Number(question.manualPoints || 0) === value ? "selected" : ""}>${String(value).replace(".", ",")}</option>`).join("")}</select>`)}
+      </article>
+    `;
+  }
+  if (question.type === "scenario") {
+    return `
+      <article class="exam-catalog-question scenario-runner-question" data-question-id="${escapeHtml(question.id)}">
+        <div class="catalog-question-body">
+          <div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>Max. ${escapeHtml(maxPoints)} Punkte</small></div>
+          <label>Antwort / Ablauf des Prüflings<textarea data-autosave-exam data-exam-answer="${escapeHtml(question.id)}" placeholder="Ablauf, Entscheidungen und Antworten mitschreiben">${escapeHtml(question.traineeAnswer || "")}</textarea></label>
+          ${question.solution ? `<div class="inline-solution">Musterlösung: ${escapeHtml(question.solution)}</div>` : ""}
+        </div>
         ${scoreBlock(`<select class="${scoreClass(question.manualPoints)}" data-exam-score="${escapeHtml(question.id)}">${scoreValues.map((value) => `<option value="${value}" ${Number(question.manualPoints || 0) === value ? "selected" : ""}>${String(value).replace(".", ",")}</option>`).join("")}</select>`)}
       </article>
     `;
@@ -4183,28 +4538,65 @@ function renderCatalogQuestion(question, index, side = "main") {
 
 function renderEstCatalogRunner(exam) {
   const mainModule = currentManagedExamModule(exam);
-  const locationModule = estLocationModule(exam);
+  const sideModules = estSideModulesForMain(exam, mainModule);
+  const isHeliModule = mainModule?.id === "est-heli";
+  const mainQuestions = isHeliModule ? (mainModule?.questions || []).filter((question) => question.stationType !== "combat") : (mainModule?.questions || []);
+  const heliSideQuestions = isHeliModule ? (mainModule?.questions || []).filter((question) => question.stationType === "combat") : [];
   return `
     ${renderExamModuleStepper(exam)}
     <div class="est-runner-shell">
       <section class="est-runner-main ${mainModule?.status === "Abgeschlossen" ? examModuleTone(mainModule) : ""}">
         <div class="panel-header slim"><div><h3>${escapeHtml(mainModule?.name || "Hauptmodul")}</h3><p class="muted">Fragenkatalog links · alle Eingaben speichern automatisch.</p></div></div>
         <div class="exam-catalog-list">
-          ${(mainModule?.questions || []).map((question, index) => renderCatalogQuestion(question, index, "main")).join("") || `<p class="muted">Keine Fragen in diesem Modul.</p>`}
+          ${mainQuestions.map((question, index) => renderCatalogQuestion(question, index, isHeliModule ? "location" : "main")).join("") || `<p class="muted">Keine Fragen in diesem Modul.</p>`}
         </div>
       </section>
-      <aside class="est-location-side ${locationModule?.status === "Abgeschlossen" ? examModuleTone(locationModule) : ""}">
-        <div class="panel-header slim"><div><h3>Ortskunde</h3><p class="muted">Läuft parallel zu den Hauptmodulen.</p></div></div>
-        <div class="exam-catalog-list location-list">
-          ${(locationModule?.questions || []).map((question, index) => renderCatalogQuestion(question, index, "location")).join("") || `<p class="muted">Keine Orte hinterlegt.</p>`}
-        </div>
+      <aside class="est-location-side">
+        <div class="panel-header slim"><div><h3>${mainModule?.id === "est-scenario" ? "Szenario-Infos" : mainModule?.id === "est-heli" ? "Dachlandungen" : mainModule?.id === "est-rules" ? "Fahrstrecke" : "Praxis"}</h3><p class="muted">${sideModules.length || mainModule?.id === "est-scenario" || isHeliModule ? "Parallel zum aktuellen Modul." : "Dieses Modul läuft ohne parallele Praxisstrecke."}</p></div></div>
+        ${mainModule?.id === "est-scenario" ? renderScenarioSidePanel(mainModule) : ""}
+        ${isHeliModule ? `
+          <section class="est-side-module ${mainModule.status === "Abgeschlossen" ? examModuleTone(mainModule) : ""}">
+            <div class="catalog-question-head"><b>Dächer / Landepunkte</b><small>${escapeHtml(mainModule.status || "Offen")}</small></div>
+            <div class="exam-catalog-list location-list">
+              ${heliSideQuestions.map((question, index) => renderCatalogQuestion(question, index, "location")).join("") || `<p class="muted">Keine Dachlandungen hinterlegt.</p>`}
+            </div>
+          </section>
+        ` : ""}
+        ${!isHeliModule && sideModules.length ? sideModules.map((sideModule) => `
+          <section class="est-side-module ${sideModule.status === "Abgeschlossen" ? examModuleTone(sideModule) : ""}">
+            <div class="catalog-question-head"><b>${escapeHtml(sideModule.name)}</b><small>${escapeHtml(sideModule.status || "Offen")}</small></div>
+            <div class="exam-catalog-list location-list">
+              ${(sideModule.questions || []).map((question, index) => renderCatalogQuestion(question, index, "location")).join("") || `<p class="muted">Keine Einträge hinterlegt.</p>`}
+            </div>
+          </section>
+        `).join("") : (!isHeliModule && mainModule?.id !== "est-scenario" ? `<p class="muted">Keine parallele Praxisstrecke in diesem Abschnitt.</p>` : "")}
       </aside>
     </div>
   `;
 }
 
+function renderScenarioSidePanel(module) {
+  return `
+    <section class="est-side-module scenario-side-module">
+      ${(module?.questions || []).map((question, index) => `
+        <article class="scenario-side-card">
+          <div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>Prüferbereich</small></div>
+          <div class="scenario-info-box">
+            <strong>Szenario Ablauf / Prüferinfos</strong>
+            <p>${escapeHtml(question.scenarioInfo || "Noch keine Szenario-Infos im Leitungsbereich hinterlegt.")}</p>
+          </div>
+          <div class="scenario-info-box">
+            <strong>Akte / Maßnahme</strong>
+            <p>${escapeHtml(question.fileAction || "Noch keine Akte oder Maßnahme hinterlegt.")}</p>
+          </div>
+        </article>
+      `).join("") || `<p class="muted">Keine Szenario-Einträge hinterlegt.</p>`}
+    </section>
+  `;
+}
+
 function renderNextModuleMenu(exam) {
-  const modules = exam.kind === "est" ? estMainModules(exam) : exam.modules;
+  const modules = (exam.kind === "est" ? estMainModules(exam) : exam.modules).filter((module) => module.status !== "Abgeschlossen");
   return `
     <div class="next-module-menu hidden" id="nextModuleMenu">
       <strong>Modul auswählen</strong>
@@ -4242,7 +4634,7 @@ function renderExamModuleStart(exam, candidate) {
         <strong>Startmodul auswählen</strong>
         ${modules.map((module) => `<button type="button" class="ghost-btn ${exam.activeMainModuleId === module.id ? "selected" : ""}" data-start-module-id="${escapeHtml(module.id)}">${escapeHtml(module.name)}</button>`).join("") || `<p class="muted">Alle Module sind abgeschlossen.</p>`}
       </div>
-      <p class="muted">Ortskunde läuft bei EST rechts parallel mit und wird separat bewertet.</p>
+      <p class="muted">Ortskunde, Helistrecke und Fahrstrecke laufen rechts parallel mit und werden separat bewertet.</p>
     </section>
   `;
 }
@@ -4250,11 +4642,17 @@ function renderExamModuleStart(exam, candidate) {
 function renderExamAnswerSummary(question) {
   if (question.type === "choice") {
     const selected = question.selectedAnswers || [];
-    const missing = (question.correctAnswers || []).filter((answer) => !selected.includes(answer));
     return `
-      <small><b>Ausgewählt:</b> ${escapeHtml(selected.join(", ") || "-")}</small>
-      <small><b>Nicht genannt:</b> ${escapeHtml(missing.join(", ") || "-")}</small>
-      <small><b>Leer:</b> ${question.skipped ? "Ja" : "Nein"} · <b>Minuspunkt:</b> ${question.questionPenalty ? "Ja" : "Nein"}</small>
+      <small><b>Markiert:</b> ${escapeHtml(selected.join(", ") || "-")}</small>
+      <small><b>Antwort / Notizen:</b> ${escapeHtml(question.traineeAnswer || "-")}</small>
+      <small><b>Leer:</b> ${question.skipped ? "Ja" : "Nein"}</small>
+    `;
+  }
+  if (question.type === "scenario") {
+    return `
+      <small><b>Szenario:</b> ${escapeHtml(question.scenarioInfo || "-")}</small>
+      <small><b>Akte / Maßnahme:</b> ${escapeHtml(question.fileAction || "-")}</small>
+      <small><b>Antwort / Ablauf:</b> ${escapeHtml(question.traineeAnswer || "-")}</small>
     `;
   }
   return `
@@ -4321,7 +4719,7 @@ function openTrainingExamModal(examId, readOnly = false) {
   const isSetup = !archiveView && (exam.status === "Vorbereitung" || exam.status === "Modul bereit" || !exam.activeMainModuleId);
   const isPaused = exam.status === "Pausiert";
   const mainModule = currentManagedExamModule(exam);
-  const locationModule = estLocationModule(exam);
+  const sideModules = estSideModules(exam);
   openModal(`
     <div class="exam-modal-head">
       <div><h3>${exam.kind === "est" ? "EST Prüfung" : "Modul Prüfung"}</h3><p class="muted">${escapeHtml(candidate ? fullName(candidate) : "Unbekannter Prüfling")} · ${escapeHtml(examProgressText(exam))}</p></div>
@@ -4334,13 +4732,19 @@ function openTrainingExamModal(examId, readOnly = false) {
     ` : isSetup ? renderExamModuleStart(exam, candidate) : exam.kind === "est" ? renderEstCatalogRunner(exam) : renderModuleCatalogRunner(exam)}
     <div class="modal-actions">
       <button class="ghost-btn" id="closeExamRunner" type="button">${archiveView ? "Schließen" : "Schließen"}</button>
-      ${isSetup ? `<button class="blue-btn" id="beginExamRunner" type="button">Prüfung starten</button>` : ""}
-      ${!archiveView && !isSetup ? `<button class="blue-btn" id="startAnotherModule" type="button">Weiteres Modul starten</button>` : ""}
+      ${isSetup ? `<button class="blue-btn" id="beginExamRunner" type="button">${exam.status === "Modul bereit" ? "Modul starten" : "Prüfung starten"}</button>` : ""}
+      ${!archiveView && !isSetup && exam.status !== "Modul bereit" ? `<button class="blue-btn" id="finishMainModule" type="button">Modul abschließen</button>` : ""}
+      ${!archiveView && !isSetup && exam.status === "Modul bereit" ? `<button class="blue-btn" id="startAnotherModule" type="button">Nächstes Modul starten</button>` : ""}
     </div>
     ${!archiveView && !isSetup ? renderNextModuleMenu(exam) : ""}
   `, (modal) => {
     modal.classList.add("exam-modal", "catalog-exam-modal");
     if (isSetup) modal.classList.add("setup-exam-modal");
+    if (isSetup && exam.status === "Vorbereitung" && !exam.startedAt) {
+      modalRoot.dataset.discardTrainingExamId = exam.id;
+    } else {
+      delete modalRoot.dataset.discardTrainingExamId;
+    }
     const persist = (message = "") => {
       ensureExamModuleState(exam);
       saveActiveTrainingExam(exam);
@@ -4351,18 +4755,29 @@ function openTrainingExamModal(examId, readOnly = false) {
       const module = exam.modules.find((item) => item.questions.some((question) => question.id === questionId));
       const question = module?.questions.find((item) => item.id === questionId);
       if (!question) return;
-      if (question.type === "choice") {
+      if (question.type === "choice" || question.type === "scenario") {
         question.skipped = Boolean(card.querySelector(`[name='questionSkipped_${CSS.escape(question.id)}']`)?.checked);
-        question.penaltyPoints = Number(card.querySelector(`[data-exam-penalty='${CSS.escape(question.id)}']`)?.value || 0);
-        question.questionPenalty = question.penaltyPoints > 0;
+        question.penaltyPoints = 0;
+        question.questionPenalty = false;
         question.selectedAnswers = question.skipped ? [] : Array.from(card.querySelectorAll(`[name='answerOption_${CSS.escape(question.id)}']:checked`)).map((input) => input.value);
-        question.manualPoints = scoreChoiceQuestion(question);
-        question.result = { points: question.manualPoints };
-      } else {
         const answer = card.querySelector(`[data-exam-answer='${CSS.escape(question.id)}']`);
         const score = card.querySelector(`[data-exam-score='${CSS.escape(question.id)}']`);
         if (answer) question.traineeAnswer = answer.value || "";
         if (score) question.manualPoints = Number(score.value);
+        question.result = { points: question.manualPoints };
+      } else {
+        const answer = card.querySelector(`[data-exam-answer='${CSS.escape(question.id)}']`);
+        const score = card.querySelector(`[data-exam-score='${CSS.escape(question.id)}']`);
+        const time = card.querySelector(`[data-exam-time='${CSS.escape(question.id)}']`);
+        const target = card.querySelector(`[data-exam-target='${CSS.escape(question.id)}']`);
+        if (answer) question.traineeAnswer = answer.value || "";
+        if (time) question.timeSeconds = secondsFromTimeInput(time.value);
+        if (target) question.targetSeconds = secondsFromTimeInput(target.value);
+        if (Number(question.maxPoints || 1) > 1 || question.targetSeconds) {
+          question.manualPoints = timedQuestionPoints(question);
+        } else if (score) {
+          question.manualPoints = Number(score.value);
+        }
         question.result = { points: question.manualPoints };
       }
       if (!exam.startedAt) exam.startedAt = new Date().toISOString();
@@ -4393,12 +4808,16 @@ function openTrainingExamModal(examId, readOnly = false) {
         showNotify("Bitte zuerst ein Startmodul auswählen.", "error");
         return;
       }
+      delete modalRoot.dataset.discardTrainingExamId;
       const module = exam.modules.find((item) => item.id === selected);
       exam.secondExaminerId = modal.querySelector("#examSetupSecondExaminer")?.value || "";
       exam.activeMainModuleId = selected;
       exam.moduleIndex = exam.modules.findIndex((item) => item.id === selected);
       exam.status = "Laufend";
       exam.startedAt = exam.startedAt || new Date().toISOString();
+      exam.modules.forEach((item) => {
+        if (item.id !== selected && item.status !== "Abgeschlossen") item.status = "Offen";
+      });
       if (module) {
         module.status = "Laufend";
         module.startedAt = module.startedAt || new Date().toISOString();
@@ -4414,9 +4833,6 @@ function openTrainingExamModal(examId, readOnly = false) {
         }
         saveQuestionFromCard(input.closest(".exam-catalog-question"));
       });
-    });
-    modal.querySelectorAll("[data-exam-penalty]").forEach((input) => {
-      input.addEventListener("change", () => saveQuestionFromCard(input.closest(".exam-catalog-question")));
     });
     modal.querySelector("#saveExamRunner")?.addEventListener("click", () => {
       saveAll();
@@ -4446,41 +4862,57 @@ function openTrainingExamModal(examId, readOnly = false) {
         mainModule.completedAt = new Date().toISOString();
         mainModule.result = { total: examModuleTotal(mainModule), points: examModulePoints(mainModule), percent: examModulePercent(mainModule) };
       }
-      const completedAll = finalizeExamIfComplete(exam);
-      if (!completedAll) exam.status = "Modul bereit";
-      saveActiveTrainingExam(exam);
-      openTrainingExamModal(exam.id);
-      renderDepartmentPage(departmentByPage(state.page));
-      showNotify(completedAll ? "EST Prüfung vollständig abgeschlossen." : "Modul abgeschlossen.", "success");
-    });
-    modal.querySelector("#finishLocationModule")?.addEventListener("click", () => {
-      saveAll();
-      if (locationModule) {
-        locationModule.status = "Abgeschlossen";
-        locationModule.completedAt = new Date().toISOString();
-        locationModule.result = { total: examModuleTotal(locationModule), points: examModulePoints(locationModule), percent: examModulePercent(locationModule) };
+      const remainingMain = estMainModules(exam).some((module) => module.status !== "Abgeschlossen");
+      if (exam.kind === "est") {
+        estSideModulesForMain(exam, mainModule).forEach((sideModule) => {
+          sideModule.status = "Abgeschlossen";
+          sideModule.completedAt = sideModule.completedAt || new Date().toISOString();
+          sideModule.result = { total: examModuleTotal(sideModule), points: examModulePoints(sideModule), percent: examModulePercent(sideModule) };
+        });
+      }
+      if (!remainingMain && exam.kind === "est") {
+        estSideModules(exam).forEach((sideModule) => {
+          if (sideModule.status === "Abgeschlossen") return;
+          sideModule.status = "Abgeschlossen";
+          sideModule.completedAt = sideModule.completedAt || new Date().toISOString();
+          sideModule.result = { total: examModuleTotal(sideModule), points: examModulePoints(sideModule), percent: examModulePercent(sideModule) };
+        });
       }
       const completedAll = finalizeExamIfComplete(exam);
-      if (!completedAll) exam.status = "Laufend";
+      if (!completedAll) {
+        const next = estMainModules(exam).find((module) => module.status !== "Abgeschlossen");
+        if (next) {
+          exam.activeMainModuleId = next.id;
+          exam.moduleIndex = exam.modules.findIndex((module) => module.id === next.id);
+          exam.modules.forEach((module) => {
+            if (module.status !== "Abgeschlossen") module.status = module.id === next.id ? "Offen" : "Offen";
+          });
+        }
+        exam.status = "Modul bereit";
+      }
       saveActiveTrainingExam(exam);
-      openTrainingExamModal(exam.id);
       renderDepartmentPage(departmentByPage(state.page));
-      showNotify(completedAll ? "EST Prüfung vollständig abgeschlossen." : "Ortskunde abgeschlossen.", "success");
+      showNotify(completedAll ? "EST Prüfung vollständig abgeschlossen." : "Modul abgeschlossen.", "success");
+      if (completedAll) {
+        openTrainingExamModal(exam.id, true);
+      } else {
+        closeModal();
+      }
     });
     modal.querySelector("#startAnotherModule")?.addEventListener("click", () => {
       modal.querySelector("#nextModuleMenu")?.classList.toggle("hidden");
     });
     modal.querySelectorAll(".next-module-pick").forEach((button) => button.addEventListener("click", () => {
       saveAll();
-      if (mainModule) {
+      if (mainModule && mainModule.status !== "Abgeschlossen") {
         mainModule.status = "Abgeschlossen";
         mainModule.completedAt = new Date().toISOString();
         mainModule.result = { total: examModuleTotal(mainModule), points: examModulePoints(mainModule), percent: examModulePercent(mainModule) };
-      }
-      if (locationModule && exam.kind === "est") {
-        locationModule.status = "Abgeschlossen";
-        locationModule.completedAt = locationModule.completedAt || new Date().toISOString();
-        locationModule.result = { total: examModuleTotal(locationModule), points: examModulePoints(locationModule), percent: examModulePercent(locationModule) };
+        estSideModulesForMain(exam, mainModule).forEach((sideModule) => {
+          sideModule.status = "Abgeschlossen";
+          sideModule.completedAt = sideModule.completedAt || new Date().toISOString();
+          sideModule.result = { total: examModuleTotal(sideModule), points: examModulePoints(sideModule), percent: examModulePercent(sideModule) };
+        });
       }
       const completedAll = finalizeExamIfComplete(exam);
       if (!completedAll) {
@@ -4495,15 +4927,15 @@ function openTrainingExamModal(examId, readOnly = false) {
         }
       }
       saveActiveTrainingExam(exam);
-      openTrainingExamModal(exam.id);
       renderDepartmentPage(departmentByPage(state.page));
       showNotify(completedAll ? "EST Prüfung vollständig abgeschlossen." : "Modul abgeschlossen.", "success");
+      openTrainingExamModal(exam.id, completedAll);
     }));
     modal.querySelector("#closeExamRunner")?.addEventListener("click", () => {
       if (!archiveView && !isSetup) saveAll();
       closeModal();
       renderDepartmentPage(departmentByPage(state.page));
-      if (!archiveView) showNotify("Prüfung automatisch gespeichert.", "success");
+      if (!archiveView && !isSetup) showNotify("Prüfung automatisch gespeichert.", "success");
     });
   });
 }
@@ -4676,7 +5108,12 @@ async function saveInformationDocDirect(doc, title, body, closeAfter = false) {
     acknowledgedBy: []
   }, ...(state.settings.informationDocChanges || [])];
   await saveInformationPatch({ informationDocs: upsertById(informationDocs(), nextDoc), informationDocChanges: changes });
-  if (!closeAfter) openInformationDocView(nextDoc.id);
+  if (closeAfter) {
+    closeModal();
+    renderInformation();
+  } else {
+    openInformationDocView(nextDoc.id);
+  }
 }
 
 function openInformationDocCloseConfirm(doc, title, before, after) {
@@ -4837,6 +5274,7 @@ function renderPage() {
   if (state.page === "Dienstblatt") return renderDienstblatt();
   if (state.page === "Mitglieder") return renderMembers();
   if (state.page === "Mitgliederfluktation") return renderFluctuation();
+  if (state.page === "Beschlagnahmung") return renderSeizures();
   if (state.page === "Kalender") return renderCalendar();
   if (state.page === "Informationen") return renderInformation();
   if (state.page === "Postfach") return renderPostfach();
@@ -5148,7 +5586,10 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
         <textarea class="paper-doc-page paper-doc-editor" id="paperDocEditor">${escapeHtml(readBody)}</textarea>
       </div>` : ""}
       <aside class="paper-doc-tools">
-        <input id="docSearchInput" placeholder="Im Dokument suchen">
+        <div class="doc-search-control">
+          <input id="docSearchInput" placeholder="Im Dokument suchen">
+          <span id="docSearchCount">0 Treffer</span>
+        </div>
         ${canEdit ? `<button class="mode-toggle-btn" id="toggleDocMode" type="button">Bearbeitermodus</button><button class="blue-btn hidden" id="saveDocFromEditor" type="button">Speichern</button>` : ""}
         <button class="ghost-btn" id="toggleDocChanges" type="button">Changelog (${changes.length})</button>
       </aside>
@@ -5232,13 +5673,12 @@ function renderInformation() {
   const factions = state.settings.informationFactions || [];
   content.innerHTML = `
     <section class="department-info-view information-admin-view modern-info-view">
-      <div class="info-box full information-card internal-doc-card"><div class="department-modal-heading"><h4>Vorschriften</h4>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn" id="addInformationDoc">${iconSvg("Plus")} Dokument</button>` : ""}</div><div class="internal-doc-grid">${docs.map((doc) => `<button class="internal-doc-tile" data-doc-id="${escapeHtml(doc.id)}"><strong>${escapeHtml(doc.title)}</strong><small>Zuletzt geändert: ${formatDateTime(doc.updatedAt)}</small></button>`).join("")}</div></div>
+      <div class="info-box full information-card internal-doc-card"><div class="department-modal-heading"><h4>Vorschriften</h4>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn add-doc-button" id="addInformationDoc">${iconSvg("Plus")} Neue Vorschrift hinzufügen</button>` : ""}</div><div class="internal-doc-grid">${docs.map((doc) => `<article class="internal-doc-tile-wrap"><button class="internal-doc-tile" data-doc-id="${escapeHtml(doc.id)}"><strong>${escapeHtml(doc.title)}</strong><small>Zuletzt geändert: ${formatDateTime(doc.updatedAt)}</small></button>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="mini-icon danger delete-info-doc" type="button" data-id="${escapeHtml(doc.id)}" title="Vorschrift löschen">${actionIcon("delete")}</button>` : ""}</article>`).join("")}</div></div>
       <div class="info-box full information-card redirects-card"><div class="department-modal-heading"><h4>Link Weiterleitungen</h4>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn" id="addInformationLink">${iconSvg("Plus")} Hinzufügen</button>` : ""}</div><div class="link-card-grid">${links.map((link) => `<article class="small-link-card"><strong>${escapeHtml(link.title)}</strong><span class="link-label">Link:</span><a href="${escapeHtml(link.url)}" target="_blank" rel="noreferrer">${escapeHtml(link.url)}</a>${canAccess("actions", "manageInformation", "Direktion") ? `<span class="button-row"><button class="blue-btn compact-action edit-info-link" data-id="${link.id}" title="Bearbeiten">${actionIcon("edit")} Bearbeiten</button><button class="mini-icon danger delete-info-link" data-id="${link.id}" title="Löschen">${actionIcon("delete")}</button></span>` : ""}</article>`).join("") || `<p class="muted">Noch keine Weiterleitungen.</p>`}</div></div>
       <div class="info-box full information-card"><div class="department-modal-heading"><h4>Rechte Definition</h4>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn" id="editInformationRights">${actionIcon("edit")} Bearbeiten</button>` : ""}</div><div class="rich-text-view">${formatDepartmentText(state.settings.informationRightsText)}</div></div>
       <div class="info-box full information-card"><div class="department-modal-heading"><h4>Sondergenehmigungen</h4>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn" id="addInformationPermit">${iconSvg("Plus")} Hinzufügen</button>` : ""}</div><div class="table-wrap compact-table"><table><thead><tr><th>Vor- und Nachname</th><th>Beschreibung</th><th>Gültig Bis</th><th>Aktionen</th></tr></thead><tbody>${permits.map((permit) => `<tr><td>${escapeHtml(permit.name)}</td><td>${escapeHtml(permit.description)}</td><td>${formatDate(permit.validUntil)}</td><td>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="mini-icon edit-info-permit" data-id="${permit.id}">${actionIcon("edit")}</button><button class="mini-icon danger delete-info-permit" data-id="${permit.id}">${actionIcon("delete")}</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">Keine Sondergenehmigungen.</td></tr>`}</tbody></table></div></div>
       <div class="info-box full information-card"><div class="department-modal-heading"><h4>Fraktionen</h4>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn" id="addInformationFaction">${iconSvg("Plus")} Hinzufügen</button>` : ""}</div><div class="table-wrap compact-table"><table><thead><tr><th>Organisation</th><th>Status</th><th>Aktionen</th></tr></thead><tbody>${factions.map((faction) => `<tr><td>${escapeHtml(faction.organization)}</td><td><span class="status-label">${renderStatusDot(faction.status)}</span></td><td>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="mini-icon edit-info-faction" data-id="${faction.id}">${actionIcon("edit")}</button><button class="mini-icon danger delete-info-faction" data-id="${faction.id}">${actionIcon("delete")}</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Keine Fraktionen.</td></tr>`}</tbody></table></div></div>
     </section>
-    <section class="panel"><div class="panel-header"><h3><span class="section-icon">${iconSvg("Informationen")}</span>Informationen</h3>${canAccess("actions", "manageInformation", "Direktion") ? `<button class="blue-btn" id="editInformation">${actionIcon("edit")} Bearbeiten</button>` : ""}</div><div class="info-box"><strong>Bewerbungsstatus</strong><p><span class="application-pill ${state.settings.applicationStatus === "Offen" ? "open" : "closed"}">${escapeHtml(state.settings.applicationStatus)}</span></p></div><div class="info-box"><strong>Beschreibung</strong><p>${escapeHtml(state.settings.informationText)}</p></div></section>
   `;
   $("#editInformation")?.addEventListener("click", openInformationEditModal);
   $("#editInformationRights")?.addEventListener("click", openInformationRightsModal);
@@ -5247,12 +5687,43 @@ function renderInformation() {
   $("#addInformationPermit")?.addEventListener("click", () => openInformationPermitModal());
   $("#addInformationFaction")?.addEventListener("click", () => openInformationFactionModal());
   document.querySelectorAll(".edit-info-link").forEach((button) => button.addEventListener("click", () => openInformationLinkModal(links.find((item) => item.id === button.dataset.id))));
-  document.querySelectorAll(".delete-info-link").forEach((button) => button.addEventListener("click", () => deleteInformationItem("informationLinks", button.dataset.id)));
+  document.querySelectorAll(".delete-info-link").forEach((button) => button.addEventListener("click", () => openDeleteInformationConfirm("informationLinks", button.dataset.id, "Weiterleitung löschen?")));
   document.querySelectorAll(".edit-info-permit").forEach((button) => button.addEventListener("click", () => openInformationPermitModal(permits.find((item) => item.id === button.dataset.id))));
   document.querySelectorAll(".delete-info-permit").forEach((button) => button.addEventListener("click", () => deleteInformationItem("informationPermits", button.dataset.id)));
   document.querySelectorAll(".edit-info-faction").forEach((button) => button.addEventListener("click", () => openInformationFactionModal(factions.find((item) => item.id === button.dataset.id))));
   document.querySelectorAll(".delete-info-faction").forEach((button) => button.addEventListener("click", () => deleteInformationItem("informationFactions", button.dataset.id)));
   document.querySelectorAll(".internal-doc-tile").forEach((button) => button.addEventListener("click", () => openInformationDocView(button.dataset.docId)));
+  document.querySelectorAll(".delete-info-doc").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openDeleteInformationDocConfirm(button.dataset.id);
+  }));
+}
+
+function openDeleteInformationDocConfirm(docId) {
+  const doc = informationDocs().find((item) => item.id === docId);
+  if (!doc || !canAccess("actions", "manageInformation", "Direktion")) return;
+  openModal(`
+    <h3>Vorschrift löschen?</h3>
+    <p class="muted">Die Vorschrift <strong>${escapeHtml(doc.title)}</strong> wird dauerhaft entfernt.</p>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions">
+      <button class="ghost-btn" data-close>Abbrechen</button>
+      <button class="red-btn" id="confirmDeleteInfoDoc">Löschen</button>
+    </div>
+  `, (modal) => {
+    modal.querySelector("#confirmDeleteInfoDoc").addEventListener("click", async () => {
+      try {
+        await saveInformationPatch({
+          informationDocs: informationDocs().filter((item) => item.id !== docId),
+          informationDocChanges: (state.settings.informationDocChanges || []).filter((change) => change.docId !== docId)
+        });
+        closeModal();
+        renderInformation();
+      } catch (error) {
+        modal.querySelector("#modalError").textContent = error.message;
+      }
+    });
+  });
 }
 
 async function deleteInformationDocChange(changeId, docId) {
@@ -5430,7 +5901,12 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
     modal.querySelector("#saveDocFromEditor")?.addEventListener("click", async () => {
       try {
         const title = modal.querySelector("#paperDocTitle")?.value.trim() || doc.title;
-        await saveInformationDocDirect(doc, title, editor()?.value || "", false);
+        const current = editor()?.value || "";
+        if (current === initial && title === doc.title) {
+          showNotify("Keine Änderungen vorhanden.", "info");
+          return;
+        }
+        openInformationDocCloseConfirm(doc, title, initial, current);
       } catch (error) {
         showNotify(error.message, "error");
       }
@@ -5440,12 +5916,7 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
     if (x && canEdit) {
       const clone = x.cloneNode(true);
       x.replaceWith(clone);
-      clone.addEventListener("click", () => {
-        const title = modal.querySelector("#paperDocTitle")?.value.trim() || doc.title;
-        const current = editor()?.value || initial;
-        if (current !== initial || title !== doc.title) openInformationDocCloseConfirm(doc, title, initial, current);
-        else closeModal();
-      });
+      clone.addEventListener("click", closeModal);
     }
     modal.querySelector("#docSearchInput")?.addEventListener("input", (event) => {
       const term = event.target.value.trim();
@@ -5656,8 +6127,8 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
     modal.classList.add("wide-doc-modal");
     let editMode = false;
     let savedDocSelection = null;
-    const initial = sanitizeInformationHtml(editorHtml);
     const editor = () => modal.querySelector("#paperDocEditor");
+    const initial = sanitizeInformationHtml(editor()?.innerHTML || editorHtml);
     const saveDocSelection = () => {
       const selection = window.getSelection();
       const currentEditor = editor();
@@ -5713,6 +6184,10 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
     modal.querySelector("#saveDocFromEditor")?.addEventListener("click", () => {
       const title = modal.querySelector("#paperDocTitle")?.value.trim() || doc.title;
       const current = sanitizeInformationHtml(editor()?.innerHTML || "");
+      if (current === initial && title === doc.title) {
+        showNotify("Keine Änderungen vorhanden.", "info");
+        return;
+      }
       openInformationDocCloseConfirm(doc, title, initial, current);
     });
     if (focusChangeId) window.setTimeout(() => openInformationDocChangelog(doc.id, focusChangeId), 50);
@@ -5722,10 +6197,33 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       x.replaceWith(clone);
       clone.addEventListener("click", closeModal);
     }
+    let searchIndex = -1;
+    const updateDocSearch = (term, move = 0) => {
+      const page = modal.querySelector("#paperDocPage");
+      const counter = modal.querySelector("#docSearchCount");
+      if (!page) return;
+      page.innerHTML = formatInformationDocText(readBody, term);
+      const marks = [...page.querySelectorAll(".doc-search-mark")];
+      if (!marks.length) {
+        searchIndex = -1;
+        if (counter) counter.textContent = term ? "0 Treffer" : "0 Treffer";
+        return;
+      }
+      searchIndex = move ? (searchIndex + move + marks.length) % marks.length : 0;
+      marks.forEach((mark) => mark.classList.remove("active-search-mark"));
+      marks[searchIndex].classList.add("active-search-mark");
+      marks[searchIndex].scrollIntoView({ block: "center", behavior: "smooth" });
+      if (counter) counter.textContent = `${searchIndex + 1} / ${marks.length} Treffer`;
+    };
     modal.querySelector("#docSearchInput")?.addEventListener("input", (event) => {
       const term = event.target.value.trim();
-      const page = modal.querySelector("#paperDocPage");
-      if (page) page.innerHTML = formatInformationDocText(readBody, term);
+      updateDocSearch(term, 0);
+    });
+    modal.querySelector("#docSearchInput")?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const term = event.target.value.trim();
+      if (term) updateDocSearch(term, event.shiftKey ? -1 : 1);
     });
     modal.querySelectorAll("[data-wysiwyg]").forEach((button) => {
       button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -5827,8 +6325,19 @@ function renderPostfach() {
 }
 
 function renderExamModuleStart(exam, candidate) {
-  const modules = exam.kind === "est" ? estMainModules(exam).filter((module) => module.status !== "Abgeschlossen") : exam.modules.filter((module) => module.status !== "Abgeschlossen");
-  const activeId = exam.activeMainModuleId || modules[0]?.id || "";
+  const nextModule = exam.kind === "est" ? estMainModules(exam).find((module) => module.status !== "Abgeschlossen") : exam.modules.find((module) => module.status !== "Abgeschlossen");
+  if (nextModule) {
+    exam.activeMainModuleId = nextModule.id;
+    exam.moduleIndex = exam.modules.findIndex((module) => module.id === nextModule.id);
+  }
+  const flow = exam.kind === "est"
+    ? [
+      ["1", "Rechtskunde + Ortskunde", "Rechtsfragen links, Ortskunde rechts parallel."],
+      ["2", "10-80 Szenario", "Großes Szenariofeld mit Prüferinfos und Akte/Maßnahme."],
+      ["3", "Dienstvorschriften + Fahrstrecke", "Vorschriften links, Fahrstrecke rechts mit Zeitwertung."],
+      ["4", "Helistrecke", "Route und Landedächer mit Bild, Zeit und Bewertung."]
+    ]
+    : [];
   return `
     <section class="exam-runner-card exam-module-start-card compact-start">
       <span>Prüfung vorbereiten</span>
@@ -5836,11 +6345,12 @@ function renderExamModuleStart(exam, candidate) {
       <div class="exam-setup-row">
         <label class="exam-setup-second">2. Prüfer optional<select id="examSetupSecondExaminer"><option value=""></option>${state.users.map((user) => `<option value="${user.id}" ${exam.secondExaminerId === user.id ? "selected" : ""}>${escapeHtml(fullName(user))}</option>`).join("")}</select></label>
       </div>
-      <div class="module-start-choice">
-        <strong>Startmodul auswählen</strong>
-        ${modules.map((module) => `<button type="button" class="ghost-btn ${activeId === module.id ? "selected" : ""}" data-start-module-id="${escapeHtml(module.id)}">${escapeHtml(module.name)}</button>`).join("") || `<p class="muted">Alle Module sind abgeschlossen.</p>`}
+      <input type="hidden" data-start-module-id="${escapeHtml(nextModule?.id || "")}">
+      <div class="est-fixed-flow">
+        <strong>${exam.status === "Vorbereitung" ? "Startet automatisch mit Rechtskunde" : `Nächstes Modul: ${escapeHtml(nextModule?.name || "-")}`}</strong>
+        ${flow.map(([nr, title, text]) => `<span class="${nextModule?.name && title.includes(nextModule.name) ? "active" : ""}"><b>${nr}</b><i>${escapeHtml(title)}</i><small>${escapeHtml(text)}</small></span>`).join("")}
       </div>
-      <p class="muted">Ortskunde läuft bei EST rechts parallel mit und wird separat bewertet.</p>
+      <p class="muted">Die Reihenfolge ist fest. Das Startfenster wird erst gespeichert, wenn die Prüfung wirklich gestartet wurde.</p>
     </section>
   `;
 }
@@ -5853,29 +6363,39 @@ function renderExamModuleStepper(exam) {
 
 function renderCatalogQuestion(question, index, side = "main") {
   const maxPoints = Number(question.maxPoints || 1);
-  const scoreValues = side === "location" ? [0, 0.5, 1] : [0, 0.5, 1, 1.5, 2].filter((value) => value <= maxPoints);
+  const timed = maxPoints > 1 || Number(question.targetSeconds || 0) > 0;
+  const scoreValues = timed ? Array.from({ length: Math.floor(maxPoints) + 1 }, (_, value) => value) : scoreOptionsForQuestion(question, side === "location" || question.type === "location");
   const scoreClass = (value) => `score-select score-${String(value || 0).replace(".", "-")}`;
   const scorePanel = (html) => `<div class="question-score-row"><span>Bewertung</span>${html}</div>`;
   if (side === "location" || question.type === "location") {
+    const actualPoints = timedQuestionPoints(question);
     return `
       <article class="exam-catalog-question score-left-question location-question" data-question-id="${escapeHtml(question.id)}">
-        ${scorePanel(`<select class="${scoreClass(question.manualPoints)}" data-exam-score="${escapeHtml(question.id)}">${scoreValues.map((value) => `<option value="${value}" ${Number(question.manualPoints || 0) === value ? "selected" : ""}>${String(value).replace(".", ",")}</option>`).join("")}</select>`)}
-        <div class="question-content-box"><div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>Ortskunde</small></div>${question.image ? `<img class="location-question-image" src="${escapeHtml(question.image)}" alt="">` : ""}</div>
+        ${scorePanel(timed
+          ? `<strong class="auto-time-score">${String(actualPoints).replace(".", ",")} / ${escapeHtml(maxPoints)}</strong><input type="hidden" data-exam-score="${escapeHtml(question.id)}" value="${escapeHtml(actualPoints)}">`
+          : `<select class="${scoreClass(question.manualPoints)}" data-exam-score="${escapeHtml(question.id)}">${scoreValues.map((value) => `<option value="${value}" ${Number(question.manualPoints || 0) === value ? "selected" : ""}>${String(value).replace(".", ",")}</option>`).join("")}</select>`)}
+        <div class="question-content-box">
+          <div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>${timed ? "Zeitwertung" : "Bild / Strecke"}</small></div>
+          ${question.image ? `<img class="location-question-image" src="${escapeHtml(question.image)}" alt="">` : ""}
+          ${timed ? `<div class="time-score-row"><label>Sollzeit<input data-autosave-exam data-exam-target="${escapeHtml(question.id)}" value="${escapeHtml(formatSecondsInput(question.targetSeconds || 0))}" placeholder="MM:SS"></label><label>Gefahrene Zeit<input data-autosave-exam data-exam-time="${escapeHtml(question.id)}" value="${escapeHtml(formatSecondsInput(question.timeSeconds || 0))}" placeholder="MM:SS"></label></div>` : ""}
+          ${question.solution ? `<div class="inline-solution">${escapeHtml(question.solution)}</div>` : ""}
+        </div>
       </article>
     `;
   }
-  if (question.type === "choice") {
-    const answers = normalizeChoiceAnswers(question);
+  if (question.type === "choice" || question.type === "scenario") {
+    const answers = question.type === "scenario" ? [] : (question.answers || normalizeChoiceAnswers(question));
     return `
       <article class="exam-catalog-question score-right-question compact-choice-question" data-question-id="${escapeHtml(question.id)}">
         <div class="question-content-box">
           <div class="catalog-question-head"><b>${index + 1}. ${escapeHtml(question.prompt)}</b><small>Max. ${escapeHtml(maxPoints)} Punkte</small></div>
-          <div class="exam-answer-list neutral compact-answer-list">
-            ${answers.map((answer) => `<label class="exam-check compact-answer-row"><span>${escapeHtml(answer)}</span><input data-autosave-exam type="checkbox" name="answerOption_${escapeHtml(question.id)}" value="${escapeHtml(answer)}" ${question.selectedAnswers?.includes(answer) ? "checked" : ""}></label>`).join("") || `<p class="muted">Keine Antwortmöglichkeiten hinterlegt.</p>`}
-            <label class="exam-check compact-answer-row muted-check"><span>Leer gelassen / nicht beantwortet</span><input data-autosave-exam type="checkbox" name="questionSkipped_${escapeHtml(question.id)}" ${question.skipped ? "checked" : ""}></label>
-          </div>
+          ${question.scenarioInfo ? `<div class="scenario-info-box"><strong>Szenario</strong><p>${escapeHtml(question.scenarioInfo)}</p></div>` : ""}
+          ${question.fileAction ? `<div class="scenario-info-box"><strong>Akte / Maßnahme</strong><p>${escapeHtml(question.fileAction)}</p></div>` : ""}
+          ${answers.length ? `<div class="exam-answer-list neutral compact-answer-list">${answers.map((answer) => `<label class="exam-check compact-answer-row"><span>${escapeHtml(answer)}</span><input data-autosave-exam type="checkbox" name="answerOption_${escapeHtml(question.id)}" value="${escapeHtml(answer)}" ${question.selectedAnswers?.includes(answer) ? "checked" : ""}></label>`).join("")}</div>` : ""}
+          <label>Antwort / Notizen des Prüflings<textarea data-autosave-exam data-exam-answer="${escapeHtml(question.id)}" placeholder="Antwort oder Ablauf mitschreiben">${escapeHtml(question.traineeAnswer || "")}</textarea></label>
+          ${question.solution ? `<div class="inline-solution">Musterlösung: ${escapeHtml(question.solution)}</div>` : ""}
         </div>
-        ${scorePanel(`<span class="auto-score ${scoreClass(scoreChoiceQuestion(question))}">${String(scoreChoiceQuestion(question)).replace(".", ",")}</span><label class="penalty-line"><span>Fehlerpunkte</span><select data-exam-penalty="${escapeHtml(question.id)}">${[0, 1, 2, 3].map((value) => `<option value="${value}" ${Number(question.penaltyPoints || 0) === value ? "selected" : ""}>-${value}</option>`).join("")}</select></label>`)}
+        ${scorePanel(`<select class="${scoreClass(question.manualPoints)}" data-exam-score="${escapeHtml(question.id)}">${scoreValues.map((value) => `<option value="${value}" ${Number(question.manualPoints || 0) === value ? "selected" : ""}>${String(value).replace(".", ",")}</option>`).join("")}</select>`)}
       </article>
     `;
   }
@@ -6000,22 +6520,27 @@ function positionClass(position) {
 
 function renderProfileTrainingPanel(user) {
   const groupTitles = ["Grundausbildung", "Führung / EL", "Spezialisierungen"];
+  const renderTrainingTile = (training) => {
+    const done = Boolean(user.trainings?.[training]);
+    const meta = user.trainingMeta?.[training] || {};
+    const metaText = meta.completedAt
+      ? `${formatDateTime(meta.completedAt)} · ${escapeHtml(meta.completedBy || "Unbekannt")}`
+      : "Vor Systemumstellung";
+    return `
+      <div class="profile-training-row ${done ? "done" : "open"}">
+        <span>${escapeHtml(training)}</span>
+        <b>${done ? "Abgeschlossen" : "Offen"}${done ? `<small>${metaText}</small>` : ""}</b>
+      </div>
+    `;
+  };
   return `
-    <div class="panel-header"><h3>Ausbildung</h3><span class="muted">Nach Ausbildungsreihenfolge sortiert</span></div>
-    <div class="profile-training-grid">
-      ${trainingGroups.map((group, groupIndex) => `
+    <div class="panel-header"><h3>Ausbildung</h3></div>
+    <div class="profile-training-group-grid">
+      ${trainingGroups.map((group, index) => `
         <section class="profile-training-group">
-          <h4>${escapeHtml(groupTitles[groupIndex])}</h4>
-          <div class="profile-training-list">
-            ${group.map((training) => {
-              const done = Boolean(user.trainings?.[training]);
-              return `
-                <div class="profile-training-row ${done ? "done" : "open"}">
-                  <span>${escapeHtml(training)}</span>
-                  <b>${done ? "Abgeschlossen" : "Offen"}</b>
-                </div>
-              `;
-            }).join("")}
+          <h4>${escapeHtml(groupTitles[index] || `Gruppe ${index + 1}`)}</h4>
+          <div class="profile-training-grid flat-training-grid">
+            ${group.map(renderTrainingTile).join("")}
           </div>
         </section>
       `).join("")}
@@ -6030,7 +6555,9 @@ function renderProfile() {
   const trainingDone = trainings.filter((training) => Boolean(user.trainings?.[training])).length;
   const trainingTotal = trainings.length || 1;
   const trainingPercent = Math.round((trainingDone / trainingTotal) * 100);
-  const sumDuty = (status = null) => myHistory.filter((entry) => !status || entry.status === status).reduce((sum, entry) => sum + durationMs(entry), 0);
+  const sumDuty = (status = null) => myHistory
+    .filter((entry) => !status || entry.status === status || (status === "Innendienst" && entry.status === "Admin Dienst"))
+    .reduce((sum, entry) => sum + durationMs(entry), 0);
   content.innerHTML = `
     <section class="panel profile-hero">
       ${avatarMarkup(user, "xl")}
@@ -6263,6 +6790,292 @@ function renderTemplate(page) {
   `;
 }
 
+function seizureItems() {
+  return [...(state.settings?.seizures || [])].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+function formatMoney(value) {
+  const amount = Number(value || 0);
+  return amount > 0 ? `${amount.toLocaleString("de-DE")}$` : "-";
+}
+
+function seizureEvidenceLinks(item) {
+  const links = Array.isArray(item.evidenceLinks) ? item.evidenceLinks : [];
+  const legacy = [item.weapons, item.drugs, item.other].map((value) => String(value || "").trim()).filter(Boolean);
+  return [...links.map((value) => String(value || "").trim()).filter(Boolean), ...legacy];
+}
+
+function renderEvidenceLinks(item) {
+  const links = seizureEvidenceLinks(item);
+  if (!links.length) return "-";
+  return `<div class="evidence-link-list">${links.map((link, index) => {
+    const isUrl = /^https?:\/\//i.test(link);
+    const isPrnt = /^https?:\/\/(?:www\.)?prnt\.sc\//i.test(link);
+    return isUrl
+      ? `<div class="evidence-preview-card ${isPrnt ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${isPrnt ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link)}" alt="Beweis ${index + 1}" loading="lazy" onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">PRNT.SC</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
+      : `<span>${escapeHtml(link)}</span>`;
+  }).join("")}</div>`;
+}
+
+function renderSeizures() {
+  const search = localStorage.getItem("lspd_seizure_search") || "";
+  const statRange = localStorage.getItem("lspd_seizure_stat_range") || "Gesamt";
+  const visibleLimit = Math.max(15, Number(localStorage.getItem("lspd_seizure_visible_limit") || 25));
+  const items = seizureItems();
+  const statStart = rangeStart(statRange);
+  const statItems = statStart ? items.filter((item) => new Date(item.createdAt).getTime() >= statStart.getTime()) : items;
+  const filtered = items.filter((item) => {
+    const haystack = [
+      item.suspect,
+      item.location,
+      seizureEvidenceLinks(item).join(" "),
+      item.witness,
+      item.sourceType,
+      item.officerName
+    ].join(" ").toLowerCase();
+    return haystack.includes(search.toLowerCase());
+  });
+  const totalBlackMoney = statItems.reduce((sum, item) => sum + (Number(item.blackMoney) || 0), 0);
+  const totalCrates = statItems.reduce((sum, item) => sum + (Number(item.crates) || 0), 0);
+  const dealerCount = statItems.filter((item) => item.sourceType === "Dealer").length;
+  const canDelete = hasRole("Direktion");
+  const canEditAll = hasRole("Direktion");
+  const ranges = ["Heute", "Woche", "Monat", "Gesamt"];
+  const visibleRows = filtered.slice(0, visibleLimit);
+  const hiddenRows = Math.max(0, filtered.length - visibleRows.length);
+
+  content.innerHTML = `
+    <section class="seizure-page">
+      <div class="grid-4 seizure-stats">
+        <article class="stat-card"><span>Einträge</span><strong>${statItems.length}</strong><small>${escapeHtml(statRange)} erfasst</small></article>
+        <article class="stat-card"><span>Schwarzgeld</span><strong>${totalBlackMoney.toLocaleString("de-DE")}$</strong><small>Gesamtmenge</small></article>
+        <article class="stat-card"><span>Kisten</span><strong>${totalCrates.toLocaleString("de-DE")}</strong><small>Gesamtmenge</small></article>
+        <article class="stat-card"><span>Dealer</span><strong>${dealerCount}</strong><small>Dealer-Beschlagnahmungen</small></article>
+      </div>
+      <div class="seizure-stats-head">
+        <span>Zeitraum</span>
+        <select id="seizureStatRange" class="compact-input seizure-range-select">
+          ${ranges.map((range) => `<option value="${range}" ${statRange === range ? "selected" : ""}>${range}</option>`).join("")}
+        </select>
+      </div>
+      <section class="panel seizure-panel">
+        <div class="panel-header">
+          <div><h3>${iconSvg("Beschlagnahmung")} Beschlagnahmungen (${filtered.length})</h3><p class="muted">Suche nach Tatverdächtigem, Standort, Agent oder Beweis.</p></div>
+          <button class="blue-btn" id="addSeizureBtn">${iconSvg("Plus")} Neue Beschlagnahmung</button>
+        </div>
+        <div class="seizure-search-row">
+          <input id="seizureSearch" value="${escapeHtml(search)}" placeholder="Suche nach Tatverdächtiger, Standort, Agent oder Beweis...">
+          <button class="blue-btn" id="runSeizureSearch">Suchen</button>
+        </div>
+        <div class="table-wrap seizure-table-wrap">
+          <table class="seizure-table">
+            <thead>
+              <tr>
+                <th>Tatverdächtiger</th>
+                <th>Standort</th>
+                <th>Beweise</th>
+                <th>Schwarzgeld</th>
+                <th>Kisten</th>
+                <th>Art</th>
+                <th>Agent</th>
+                <th>Mord/Totschlag</th>
+                <th>Zeitstempel</th>
+                <th>Erfasst von</th>
+                <th>Aktionen</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${visibleRows.map((item) => `
+                <tr>
+                  <td><strong>${escapeHtml(item.suspect || "-")}</strong></td>
+                  <td>${escapeHtml(item.location || "-")}</td>
+                  <td>${renderEvidenceLinks(item)}</td>
+                  <td>${formatMoney(item.blackMoney)}</td>
+                  <td>${Number(item.crates || 0) || "-"}</td>
+                  <td><span class="seizure-pill ${item.sourceType === "Dealer" ? "dealer" : "normal"}">${escapeHtml(item.sourceType || "Normal")}</span></td>
+                  <td>${escapeHtml(item.witness || "-")}</td>
+                  <td><span class="seizure-pill ${item.murder ? "yes" : "no"}">${item.murder ? "Ja" : "Nein"}</span></td>
+                  <td>${formatDateTime(item.createdAt)}</td>
+                  <td>${escapeHtml(item.officerName || "-")}</td>
+                  <td>${canEditAll || item.officerId === state.currentUser.id ? `<button class="mini-icon seizure-actions gear-action" data-id="${escapeHtml(item.id)}" title="Aktionen">${iconSvg("Settings")}</button>` : `<span class="muted">-</span>`}</td>
+                </tr>
+              `).join("") || `<tr><td colspan="11" class="empty-table">Keine Beschlagnahmungen gefunden.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        ${hiddenRows ? `<div class="seizure-more-row"><button class="ghost-btn" id="showMoreSeizures">${iconSvg("ChevronDown")} ${hiddenRows} weitere anzeigen</button></div>` : ""}
+      </section>
+    </section>
+  `;
+
+  $("#addSeizureBtn")?.addEventListener("click", () => openSeizureModal());
+  $("#seizureStatRange")?.addEventListener("change", (event) => {
+    localStorage.setItem("lspd_seizure_stat_range", event.target.value);
+    renderSeizures();
+  });
+  document.querySelectorAll(".seizure-actions").forEach((button) => button.addEventListener("click", () => openSeizureActionsModal(button.dataset.id)));
+  document.querySelectorAll(".evidence-preview-open").forEach((button) => button.addEventListener("click", () => openEvidencePreview(button.dataset.link)));
+  $("#showMoreSeizures")?.addEventListener("click", () => {
+    localStorage.setItem("lspd_seizure_visible_limit", String(visibleLimit + 25));
+    renderSeizures();
+  });
+  $("#runSeizureSearch")?.addEventListener("click", () => {
+    localStorage.setItem("lspd_seizure_search", $("#seizureSearch").value);
+    renderSeizures();
+  });
+  $("#seizureSearch")?.addEventListener("input", (event) => {
+    localStorage.setItem("lspd_seizure_search", event.target.value);
+  });
+  $("#seizureSearch")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    localStorage.setItem("lspd_seizure_search", event.target.value);
+    renderSeizures();
+  });
+}
+
+function openEvidencePreview(link) {
+  const isPrnt = /^https?:\/\/(?:www\.)?prnt\.sc\//i.test(link || "");
+  const preview = isPrnt ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : link;
+  openModal(`
+    <h3>Beweisvorschau</h3>
+    <div class="evidence-popup-preview">
+      <img src="${escapeHtml(preview)}" alt="Beweisvorschau">
+      <p class="muted evidence-preview-fallback">Falls die Vorschau nicht lädt, öffne den Link separat.</p>
+    </div>
+    <a class="blue-btn evidence-popup-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">Link öffnen</a>
+  `, (modal) => modal.classList.add("evidence-preview-modal"));
+}
+
+function openSeizureActionsModal(id) {
+  const item = seizureItems().find((entry) => entry.id === id);
+  if (!item) return;
+  const canEdit = hasRole("Direktion") || item.officerId === state.currentUser.id;
+  const canDelete = hasRole("Direktion");
+  if (!canEdit && !canDelete) return;
+  openModal(`
+    <h3>Beschlagnahmung Aktionen</h3>
+    <p class="muted">${escapeHtml(item.suspect || "-")} · ${escapeHtml(item.location || "-")}</p>
+    <div class="choice-grid">
+      ${canEdit ? `<button class="choice-card" id="editSeizureAction"><strong>Bearbeiten</strong><span>Eintrag anpassen und Beweise ergänzen.</span></button>` : ""}
+      ${canDelete ? `<button class="choice-card danger-choice" id="deleteSeizureAction"><strong>Löschen</strong><span>Eintrag dauerhaft entfernen.</span></button>` : ""}
+    </div>
+  `, (modal) => {
+    modal.querySelector("#editSeizureAction")?.addEventListener("click", () => openSeizureModal(item));
+    modal.querySelector("#deleteSeizureAction")?.addEventListener("click", () => openDeleteSeizureModal(id));
+  });
+}
+
+function openDeleteSeizureModal(id) {
+  const item = seizureItems().find((entry) => entry.id === id);
+  if (!item || !hasRole("Direktion")) return;
+  openModal(`
+    <h3>Beschlagnahmung löschen</h3>
+    <p class="muted">Eintrag von <strong>${escapeHtml(item.suspect || "-")}</strong> wirklich löschen?</p>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions">
+      <button class="ghost-btn" data-close>Abbrechen</button>
+      <button class="red-btn" id="confirmDeleteSeizure">Löschen</button>
+    </div>
+  `, (modal) => {
+    modal.querySelector("#confirmDeleteSeizure").addEventListener("click", async () => {
+      try {
+        const data = await api(`/api/seizures/${id}`, { method: "DELETE" });
+        state.settings = data.settings || { ...state.settings, seizures: (state.settings.seizures || []).filter((entry) => entry.id !== id) };
+        closeModal();
+        renderSeizures();
+      } catch (error) {
+        $("#modalError").textContent = error.message;
+      }
+    });
+  });
+}
+
+function openSeizureModal(item = null) {
+  const isEdit = Boolean(item?.id);
+  const evidenceLinks = seizureEvidenceLinks(item || {});
+  const witnessOptions = state.users
+    .filter((user) => !user.terminated)
+    .sort((a, b) => fullName(a).localeCompare(fullName(b), "de"))
+    .map((user) => `<option value="${escapeHtml(fullName(user))}" ${item?.witness === fullName(user) ? "selected" : ""}>${escapeHtml(fullName(user))} (${escapeHtml(user.dn || "-")})</option>`)
+    .join("");
+  openModal(`
+    <div class="seizure-modal-head"><span>${iconSvg(isEdit ? "Settings" : "Plus")}</span><h3>${isEdit ? "Beschlagnahmung bearbeiten" : "Neue Beschlagnahmung"}</h3></div>
+    <div class="seizure-modal-grid">
+      <label><span class="required-label">Tatverdächtiger <b>*</b></span><input id="seizureSuspect" value="${escapeHtml(item?.suspect || "")}" placeholder="Name des Tatverdächtigen" required></label>
+      <label><span class="required-label">Standort <b>*</b></span><input id="seizureLocation" value="${escapeHtml(item?.location || "")}" placeholder="Ort der Beschlagnahmung" required></label>
+      <div class="full evidence-field">
+        <div class="field-title required-label">Beweise <b>*</b></div>
+        <div id="evidenceLinkList" class="evidence-input-list">
+          ${(evidenceLinks.length ? evidenceLinks : [""]).map((link, index) => index === 0
+            ? `<input class="evidence-link-input" value="${escapeHtml(link)}" placeholder="Screenshot-Link / Beweis-Link">`
+            : `<div class="evidence-input-row"><input class="evidence-link-input" value="${escapeHtml(link)}" placeholder="Weiterer Screenshot-Link / Beweis-Link"><button class="mini-icon remove-evidence-link" type="button" title="Entfernen">X</button></div>`).join("")}
+        </div>
+        <button class="ghost-btn evidence-add-btn" type="button" id="addEvidenceLink">${iconSvg("Plus")} Weiteren Beweis hinzufügen</button>
+      </div>
+      <label>Schwarzgeld Menge<input id="seizureBlackMoney" type="number" min="0" step="1" value="${escapeHtml(item?.blackMoney || "")}" placeholder="0"></label>
+      <label>Kisten Menge<input id="seizureCrates" type="number" min="0" step="1" value="${escapeHtml(item?.crates || "")}" placeholder="0"></label>
+      <div class="seizure-source-field">
+        <span>Fundart</span>
+        <div class="seizure-source-options">
+          <label><input type="radio" name="seizureSourceType" value="Normal" ${item?.sourceType !== "Dealer" ? "checked" : ""}><span>Normal</span></label>
+          <label><input type="radio" name="seizureSourceType" value="Dealer" ${item?.sourceType === "Dealer" ? "checked" : ""}><span>Dealer</span></label>
+        </div>
+      </div>
+      <label>Zeuge / Agent
+        <select id="seizureWitness">
+          <option value="" ${item?.witness ? "" : "selected"}>Agent auswählen...</option>
+          ${witnessOptions}
+        </select>
+      </label>
+      <label class="it-toggle seizure-murder-toggle">
+        <input id="seizureMurder" type="checkbox" ${item?.murder ? "checked" : ""}>
+        <span>Mord/Totschlag</span>
+        <span class="it-toggle-ui"></span>
+      </label>
+    </div>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions"><button class="blue-btn full-action" id="saveSeizure">${isEdit ? "Beschlagnahmung speichern" : "Beschlagnahmung eintragen"}</button></div>
+  `, (modal) => {
+    modal.classList.add("seizure-modal");
+    modal.querySelectorAll(".remove-evidence-link").forEach((button) => button.addEventListener("click", () => button.closest(".evidence-input-row")?.remove()));
+    modal.querySelector("#saveSeizure").addEventListener("click", async () => {
+      try {
+        const evidenceLinks = [...document.querySelectorAll(".evidence-link-input")].map((input) => input.value.trim()).filter(Boolean);
+        if (!evidenceLinks.length) {
+          $("#modalError").textContent = "Bitte mindestens einen Beweis-Link eintragen.";
+          return;
+        }
+        const data = await api(isEdit ? `/api/seizures/${item.id}` : "/api/seizures", {
+          method: isEdit ? "PATCH" : "POST",
+          body: JSON.stringify({
+            suspect: $("#seizureSuspect").value,
+            location: $("#seizureLocation").value,
+            evidenceLinks,
+            witness: $("#seizureWitness").value,
+            murder: $("#seizureMurder").checked,
+            blackMoney: $("#seizureBlackMoney").value,
+            crates: $("#seizureCrates").value,
+            sourceType: document.querySelector("input[name='seizureSourceType']:checked")?.value || "Normal"
+          })
+        });
+        state.settings = data.settings || { ...state.settings, seizures: [data.seizure, ...(state.settings.seizures || [])] };
+        closeModal();
+        renderSeizures();
+      } catch (error) {
+        $("#modalError").textContent = error.message;
+      }
+    });
+    modal.querySelector("#addEvidenceLink").addEventListener("click", () => {
+      const row = document.createElement("div");
+      row.className = "evidence-input-row";
+      row.innerHTML = `<input class="evidence-link-input" placeholder="Weiterer Screenshot-Link / Beweis-Link"><button class="mini-icon remove-evidence-link" type="button" title="Entfernen">X</button>`;
+      modal.querySelector("#evidenceLinkList").appendChild(row);
+      row.querySelector(".remove-evidence-link").addEventListener("click", () => row.remove());
+      row.querySelector("input").focus();
+    });
+  });
+}
+
 function renderCalendar() {
   const year = calendarCursor.getFullYear();
   const month = calendarCursor.getMonth();
@@ -6470,15 +7283,17 @@ function setupTableFilter(selector) {
   const input = $(selector);
   if (!input) return;
   input.addEventListener("input", () => {
-    const term = input.value.toLowerCase();
+    const term = input.value.toLowerCase().trim();
     document.querySelectorAll(".filterable-row").forEach((row) => {
-      row.classList.toggle("hidden", !row.textContent.toLowerCase().includes(term));
+      const matches = !term || row.textContent.toLowerCase().includes(term);
+      row.classList.toggle("hidden", !matches);
+      row.classList.toggle("search-match", Boolean(term && matches));
     });
   });
 }
 
 function openModal(html, onReady) {
-  modalRoot.innerHTML = `<div class="modal"><button class="modal-x" type="button" data-close aria-label="Schließen">X</button>${html}</div>`;
+  modalRoot.innerHTML = `<div class="modal"><button class="modal-x" type="button" data-close aria-label="Schließen">×</button>${html}</div>`;
   modalRoot.classList.remove("hidden");
   document.removeEventListener("keydown", handleModalEscape);
   document.addEventListener("keydown", handleModalEscape);
@@ -6486,7 +7301,41 @@ function openModal(html, onReady) {
   onReady?.(modalRoot.querySelector(".modal"));
 }
 
+function openConfirmModal({ title = "Löschen bestätigen", text = "Diesen Eintrag wirklich löschen?", confirmText = "Löschen", onConfirm }) {
+  openModal(`
+    <h3>${escapeHtml(title)}</h3>
+    <p class="muted">${escapeHtml(text)}</p>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions">
+      <button class="ghost-btn" data-close>Abbrechen</button>
+      <button class="red-btn" id="confirmGenericDelete">${escapeHtml(confirmText)}</button>
+    </div>
+  `, (modal) => {
+    modal.querySelector("#confirmGenericDelete").addEventListener("click", async () => {
+      try {
+        await onConfirm?.();
+        closeModal();
+      } catch (error) {
+        modal.querySelector("#modalError").textContent = error.message;
+      }
+    });
+  });
+}
+
 function closeModal() {
+  const discardTrainingExamId = modalRoot.dataset.discardTrainingExamId;
+  if (discardTrainingExamId) {
+    try {
+      const store = trainingStore();
+      store.activeExams = (store.activeExams || []).filter((exam) => exam.id !== discardTrainingExamId || exam.startedAt);
+      saveTrainingStore(store);
+      const department = departmentByPage?.(state.page);
+      if (department?.id === "training-recruitment") window.setTimeout(() => renderDepartmentPage(department), 0);
+    } catch {
+      // Closing a modal should never block the UI.
+    }
+    delete modalRoot.dataset.discardTrainingExamId;
+  }
   document.removeEventListener("keydown", handleModalEscape);
   modalRoot.classList.add("hidden");
   modalRoot.innerHTML = "";
@@ -6569,25 +7418,39 @@ function openNoteModal(note = null) {
 function openStartDutyModal() {
   let selected = "";
   openModal(`
-    <h3>Dienst eintragen</h3>
-    <div class="choice-grid">
-      ${dutyOptions.map((option) => `
-        <button class="choice-card" data-status="${escapeHtml(option.title)}">
-          <strong>${escapeHtml(option.title)}</strong>
-          <span>${escapeHtml(option.description)}</span>
+    <div class="duty-workflow">
+      <div class="duty-workflow-head">
+        <span class="duty-head-icon">${iconSvg("Dienstblatt")}</span>
+        <div>
+          <span class="duty-kicker">Dienststatus</span>
+          <h3>Dienst eintragen</h3>
+          <p>Wähle den Bereich aus, in dem du jetzt arbeitest.</p>
+        </div>
+      </div>
+      <div class="duty-choice-grid">
+      ${availableDutyOptions().map((option) => {
+        const disabled = option.teamlerOnly && !state.currentUser.teamler && !hasRole("IT");
+        return `
+        <button class="duty-choice-card ${escapeHtml(option.tone || "default")}" data-status="${escapeHtml(option.title)}" ${disabled ? "disabled" : ""}>
+          <span class="duty-card-accent"></span>
+          <i>${iconSvg(option.icon)}</i>
+          <span class="duty-card-copy"><strong>${escapeHtml(option.title)}</strong><small>${escapeHtml(disabled ? "Nur für Teamler freigegeben" : option.description)}</small></span>
+          <span class="duty-card-check">✓</span>
         </button>
-      `).join("")}
-    </div>
-    <p id="modalError" class="form-error"></p>
-    <div class="modal-actions">
-      <button class="ghost-btn" data-close>Abbrechen</button>
-      <button class="blue-btn" id="confirmDuty" disabled>Dienst Starten</button>
+      `;}).join("")}
+      </div>
+      <p id="modalError" class="form-error"></p>
+      <div class="duty-modal-actions">
+        <button class="ghost-btn" data-close>Abbrechen</button>
+        <button class="blue-btn" id="confirmDuty" disabled>Eintragen</button>
+      </div>
     </div>
   `, (modal) => {
-    modal.querySelectorAll(".choice-card").forEach((button) => {
+    modal.classList.add("duty-modal");
+    modal.querySelectorAll(".duty-choice-card").forEach((button) => {
       button.addEventListener("click", () => {
         selected = button.dataset.status;
-        modal.querySelectorAll(".choice-card").forEach((item) => item.classList.remove("active"));
+        modal.querySelectorAll(".duty-choice-card").forEach((item) => item.classList.remove("active"));
         button.classList.add("active");
         $("#confirmDuty").disabled = false;
       });
@@ -6595,6 +7458,50 @@ function openStartDutyModal() {
     modal.querySelector("#confirmDuty").addEventListener("click", async () => {
       try {
         await api("/api/duty/start", { method: "POST", body: JSON.stringify({ status: selected }) });
+        closeModal();
+        await bootstrap();
+      } catch (error) {
+        $("#modalError").textContent = error.message;
+      }
+    });
+  });
+}
+
+function openSwitchDutyModal() {
+  let selected = "";
+  const current = state.duty.find((entry) => entry.userId === state.currentUser.id)?.status || "";
+  openModal(`
+    <div class="duty-workflow">
+      <div class="duty-workflow-head">
+        <span class="duty-head-icon">${iconSvg("Einsatzzentrale")}</span>
+        <div>
+          <span class="duty-kicker">Dienstwechsel</span>
+          <h3>Dienst umtragen</h3>
+          <p>Aktuell: ${escapeHtml(current || "Nicht im Dienst")}</p>
+        </div>
+      </div>
+      <div class="duty-choice-grid">
+      ${availableDutyOptions().filter((option) => option.title !== current).map((option) => {
+        const disabled = option.teamlerOnly && !state.currentUser.teamler && !hasRole("IT");
+        return `<button class="duty-choice-card ${escapeHtml(option.tone || "default")}" data-status="${escapeHtml(option.title)}" ${disabled ? "disabled" : ""}><span class="duty-card-accent"></span><i>${iconSvg(option.icon)}</i><span class="duty-card-copy"><strong>${escapeHtml(option.title)}</strong><small>${escapeHtml(disabled ? "Nur für Teamler freigegeben" : option.description)}</small></span><span class="duty-card-check">✓</span></button>`;
+      }).join("")}
+      </div>
+      <p id="modalError" class="form-error"></p>
+      <div class="duty-modal-actions">
+        <button class="ghost-btn" data-close>Abbrechen</button>
+        <button class="blue-btn" id="confirmSwitchDuty" disabled>Umtragen</button>
+      </div>
+    </div>
+  `, (modal) => {
+    modal.classList.add("duty-modal");
+    modal.querySelectorAll(".duty-choice-card").forEach((button) => button.addEventListener("click", () => {
+      selected = button.dataset.status;
+      modal.querySelectorAll(".duty-choice-card").forEach((item) => item.classList.toggle("active", item === button));
+      $("#confirmSwitchDuty").disabled = false;
+    }));
+    modal.querySelector("#confirmSwitchDuty").addEventListener("click", async () => {
+      try {
+        await api("/api/duty/switch", { method: "POST", body: JSON.stringify({ status: selected }) });
         closeModal();
         await bootstrap();
       } catch (error) {
@@ -6632,7 +7539,7 @@ function openStopAllDutyModal() {
     return;
   }
   openModal(`
-    <h3>Alle Beamten austragen</h3>
+    <h3>Alle Agents austragen</h3>
     <p class="muted">Damit werden alle aktiven Dienst-Einträge beendet.</p>
     <p id="modalError" class="form-error"></p>
     <div class="modal-actions">
@@ -6666,6 +7573,7 @@ function openUserModal(user) {
       <label>Nachname / Doppelname<input name="lastName" value="${escapeHtml(user?.lastName || "")}" required></label>
       <label>Telefonnummer<input name="phone" value="${escapeHtml(user?.phone || "")}" required></label>
       <label>DN<input name="dn" id="userDnInput" inputmode="numeric" pattern="[0-9]+" value="${escapeHtml(initialDn)}" required></label>
+      <label>Einstellungsdatum<input name="joinedAt" type="date" value="${escapeHtml((user?.joinedAt || new Date().toISOString()).slice(0, 10))}"></label>
       <div id="userDnConflict" class="full">${renderDnConflictBox(initialDnConflict, initialDn)}</div>
       <label>Rang
         <select name="rank">${state.ranks.map((rank) => `<option value="${rank.value}" ${Number(user?.rank ?? 0) === Number(rank.value) ? "selected" : ""}>${escapeHtml(rankOptionLabel(rank))}</option>`).join("")}</select>
@@ -6673,6 +7581,7 @@ function openUserModal(user) {
       <label>Rolle
         <select name="role">${baseRoles.map((role) => `<option ${selectedRole === role ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}</select>
       </label>
+      ${renderTeamlerControl(user)}
       ${renderItRoleControls(user)}
       <div class="full">
         <p class="muted">Ausbildungen</p>
@@ -6699,6 +7608,7 @@ function openUserModal(user) {
       delete body.isITLead;
       body.departments = user?.departments || [];
       body.rank = Number(body.rank);
+      body.teamler = form.get("teamler") === "on";
       body.overwriteDn = $("#overwriteDn")?.checked || false;
       body.trainings = Object.fromEntries(trainings.map((training) => [training, form.get(`training_${training}`) === "on"]));
       try {
@@ -6871,6 +7781,7 @@ function openRehireUserModal(user) {
       <label>Nachname / Doppelname<input name="lastName" id="rehireLastName" value="" required></label>
       <label>Telefonnummer<input name="phone" id="rehirePhone" value="" required></label>
       <label>Dienstnummer<input name="dn" id="rehireDnInput" inputmode="numeric" pattern="[0-9]+" value="" required></label>
+      <label>Einstellungsdatum<input name="joinedAt" id="rehireJoinedAt" type="date" value=""></label>
       <label>Rang
         <select name="rank" id="rehireRank">
           <option value="">Rang auswählen</option>
@@ -6880,6 +7791,7 @@ function openRehireUserModal(user) {
       <label>Rolle
         <select name="role">${baseRoles.map((role) => `<option ${selectedRole === role ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}</select>
       </label>
+      ${renderTeamlerControl(user)}
       ${renderItRoleControls(user)}
       <label class="full">Grund der Wiedereinstellung<textarea name="reason">Wiedereinstellung</textarea></label>
       <div class="full">
@@ -6907,8 +7819,10 @@ function openRehireUserModal(user) {
             firstName: form.get("firstName"),
             lastName: form.get("lastName"),
             phone: form.get("phone"),
+            joinedAt: form.get("joinedAt"),
             role,
             baseRole,
+            teamler: form.get("teamler") === "on",
             reason: form.get("reason"),
             overwriteDn: $("#overwriteDn")?.checked || false,
             trainings: Object.fromEntries(trainings.map((training) => [training, form.get(`training_${training}`) === "on"]))
@@ -6929,6 +7843,7 @@ function openRehireUserModal(user) {
       modal.querySelector("#rehireLastName").value = user.lastName || "";
       modal.querySelector("#rehirePhone").value = user.phone || "";
       modal.querySelector("#rehireDnInput").value = oldDn;
+      modal.querySelector("#rehireJoinedAt").value = new Date().toISOString().slice(0, 10);
       modal.querySelector("#rehireRank").value = String(info.oldRank ?? user.rank ?? "");
       modal.querySelector("#rehireDnConflict").innerHTML = renderDnConflictBox(dnConflictFor(oldDn, user.id), oldDn);
     });
@@ -7783,6 +8698,8 @@ async function logout() {
 }
 
 $("#logoutBtn")?.addEventListener("click", logout);
+
+installInspectGuard();
 
 document.addEventListener("click", (event) => {
   document.querySelectorAll(".exam-user-picker.open").forEach((picker) => {

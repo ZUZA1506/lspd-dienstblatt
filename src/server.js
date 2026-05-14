@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const fs = require("fs");
+const https = require("https");
 const path = require("path");
 const express = require("express");
 
@@ -13,23 +14,9 @@ const DEFAULT_PASSWORD = "LSPD12345";
 
 const roles = ["User", "Supervisor", "Direktion", "IT", "IT-Leitung"];
 const rolePower = { User: 1, Supervisor: 2, Direktion: 3, IT: 4, "IT-Leitung": 5 };
-const ranks = [
-  "Officer in Training",
-  "Probationary Officer",
-  "Police Officer I",
-  "Police Officer II",
-  "Senior Lead Officer",
-  "Sergeant",
-  "Lieutenant",
-  "Captain",
-  "Commander",
-  "Deputy Chief",
-  "Chief of Staff",
-  "Assistant Chief",
-  "Chief of Police"
-].map((label, index) => ({
+const ranks = Array.from({ length: 13 }, (_, index) => ({
   value: index,
-  label: `(${index}) ${label}`
+  label: `Template ${index} - Rang ${index}`
 }));
 
 function defaultRanks() {
@@ -115,7 +102,7 @@ function normalizePermissions(value = {}) {
 
 const departmentPositions = ["Direktion", "Leitung", "Stv. Leitung", "Mitglied", "Anwärter"];
 const positionPower = { "Direktion": 5, "Leitung": 4, "Stv. Leitung": 3, "Mitglied": 2, "Anwärter": 1 };
-const trainingNames = ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted", "EL", "Beamtenprüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II", "Air Support", "Riot", "Coquette"];
+const trainingNames = ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted", "EL", "Agent Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II", "Air Support", "Riot", "Coquette"];
 
 function nowIso() {
   return new Date().toISOString();
@@ -172,14 +159,17 @@ function ensureStorage() {
       ranks: defaultRanks(),
       navLabels: {},
       departments: defaultDepartments(),
-      informationText: "Hier können später zentrale Informationen für alle Beamten gepflegt werden.",
+      informationText: "Hier können später zentrale Informationen für alle Agents gepflegt werden.",
       applicationStatus: "Offen",
       calendarEvents: [],
+      seizures: [],
       fluctuation: [],
       uprankRules: defaultUprankRules(),
       uprankAdjustments: [],
       permissions: defaultPermissions(),
-      devMode: false
+      devMode: false,
+      restartTimes: [],
+      restartLastRun: {}
     },
     notes: [],
     duty: [],
@@ -200,6 +190,8 @@ function readDb() {
   }
   db.users.forEach((user) => {
     if (!user.baseRole) user.baseRole = ["IT", "IT-Leitung"].includes(user.role) ? "Direktion" : user.role || "User";
+    user.teamler = Boolean(user.teamler);
+    user.trainingMeta = user.trainingMeta && typeof user.trainingMeta === "object" ? user.trainingMeta : {};
     if (user.trainings?.Schiessen && !user.trainings["Schießen"]) {
       user.trainings["Schießen"] = true;
       delete user.trainings.Schiessen;
@@ -210,14 +202,17 @@ function readDb() {
   db.settings.ranks = Array.isArray(db.settings.ranks) && db.settings.ranks.length ? db.settings.ranks : defaultRanks();
   db.settings.navLabels = db.settings.navLabels || {};
   db.settings.departments = normalizeDepartments(db.settings.departments);
-  db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Beamten gepflegt werden.";
+  db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Agents gepflegt werden.";
   db.settings.applicationStatus = db.settings.applicationStatus || "Offen";
   if (typeof db.settings.defconText !== "string") db.settings.defconText = "Automatisch / Manuell aktualisierbar";
   db.settings.calendarEvents = Array.isArray(db.settings.calendarEvents) ? db.settings.calendarEvents : [];
+  db.settings.seizures = Array.isArray(db.settings.seizures) ? db.settings.seizures : [];
   db.settings.uprankRules = normalizeUprankRules(db.settings.uprankRules);
   db.settings.uprankAdjustments = Array.isArray(db.settings.uprankAdjustments) ? db.settings.uprankAdjustments : [];
   db.settings.permissions = normalizePermissions(db.settings.permissions);
   db.settings.devMode = Boolean(db.settings.devMode);
+  db.settings.restartTimes = Array.isArray(db.settings.restartTimes) ? db.settings.restartTimes : [];
+  db.settings.restartLastRun = db.settings.restartLastRun && typeof db.settings.restartLastRun === "object" ? db.settings.restartLastRun : {};
   db.settings.informationRightsText = String(db.settings.informationRightsText || "");
   db.settings.informationLinks = Array.isArray(db.settings.informationLinks) ? db.settings.informationLinks : [];
   db.settings.informationDocs = Array.isArray(db.settings.informationDocs) ? db.settings.informationDocs : [];
@@ -505,6 +500,8 @@ function normalizeUserInput(body, existingUser) {
     : existingUser?.baseRole || (["IT", "IT-Leitung"].includes(role) ? "Direktion" : role);
   const departments = Array.isArray(body.departments) ? body.departments.map(String) : existingUser?.departments || [];
   const trainings = body.trainings && typeof body.trainings === "object" ? body.trainings : existingUser?.trainings || {};
+  const teamler = Boolean(body.teamler);
+  const joinedAt = String(body.joinedAt || existingUser?.joinedAt || todayIso()).slice(0, 10);
 
   if (!firstName || !lastName || !phone || !dn || Number.isNaN(rank)) {
     return { error: "Name, Nachname, Telefon, DN und Rang sind Pflichtfelder." };
@@ -523,6 +520,8 @@ function normalizeUserInput(body, existingUser) {
       rank,
       role,
       baseRole,
+      teamler,
+      joinedAt,
       departments,
       trainings
     }
@@ -560,6 +559,7 @@ function userChangeSummary(db, before, after) {
     ["lastName", "Nachname"],
     ["phone", "Telefon"],
     ["dn", "Dienstnummer"],
+    ["joinedAt", "Einstellungsdatum"],
     ["role", "Rolle"]
   ];
   fields.forEach(([key, label]) => {
@@ -572,6 +572,18 @@ function userChangeSummary(db, before, after) {
     if (had !== has) changes.push(`Ausbildung ${training} ${has ? "hinzugefügt" : "entfernt"}`);
   });
   return changes.join("; ");
+}
+
+function updateTrainingMeta(user, beforeTrainings, afterTrainings, actor) {
+  user.trainingMeta = user.trainingMeta && typeof user.trainingMeta === "object" ? user.trainingMeta : {};
+  trainingNames.forEach((training) => {
+    const had = Boolean(beforeTrainings?.[training]);
+    const has = Boolean(afterTrainings?.[training]);
+    if (has && !had) {
+      user.trainingMeta[training] = { completedAt: nowIso(), completedBy: actorName(actor) };
+    }
+    if (!has && had) delete user.trainingMeta[training];
+  });
 }
 
 function daysSince(dateValue) {
@@ -616,6 +628,23 @@ app.use(express.static(PUBLIC_DIR, {
   }
 }));
 
+app.get("/api/evidence-preview", (req, res) => {
+  const url = String(req.query.url || "");
+  if (!/^https:\/\/(?:www\.)?prnt\.sc\//i.test(url)) return res.status(400).end();
+  https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (remote) => {
+    let body = "";
+    remote.setEncoding("utf8");
+    remote.on("data", (chunk) => { body += chunk; });
+    remote.on("end", () => {
+      const match = body.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+        || body.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+      const imageUrl = match?.[1] || "";
+      if (!/^https?:\/\//i.test(imageUrl) || /st\.prntscr\.com\//i.test(imageUrl)) return res.status(404).end();
+      res.redirect(imageUrl);
+    });
+  }).on("error", () => res.status(404).end());
+});
+
 app.post("/api/login", (req, res) => {
   const db = readDb();
   const name = String(req.body.name || "").trim().toLowerCase();
@@ -638,6 +667,22 @@ app.post("/api/logout", requireAuth, (req, res) => {
   req.db.sessions = req.db.sessions.filter((item) => item.token !== req.session.token);
   logAction(req.db, req.user, "Logout", `${req.user.firstName} ${req.user.lastName}`.trim());
   writeDb(req.db);
+  res.json({ ok: true });
+});
+
+app.post("/api/security/inspect-attempt", (req, res) => {
+  const db = readDb();
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const session = db.sessions.find((item) => item.token === token);
+  const user = db.users.find((item) => item.id === session?.userId);
+  const actor = user || { firstName: "Unbekannter", lastName: "Besucher" };
+  const reason = String(req.body.reason || "Untersuchen versucht").slice(0, 120);
+  const page = String(req.body.page || "").slice(0, 80);
+  logAction(db, actor, "Untersuchen blockiert", page || "Website", {
+    reason,
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 180)
+  });
+  writeDb(db);
   res.json({ ok: true });
 });
 
@@ -682,16 +727,17 @@ app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {
     id: makeId("user"),
     ...normalized.value,
     trainings: { ...Object.fromEntries(trainingNames.map((training) => [training, false])), ...normalized.value.trainings },
-    joinedAt: todayIso(),
     lastPromotionAt: todayIso(),
     passwordHash: hashPassword(DEFAULT_PASSWORD),
     avatarUrl: "",
     locked: false,
     accountStatus: "Aktiv",
     terminated: false,
+    trainingMeta: {},
     createdAt,
     updatedAt: createdAt
   };
+  updateTrainingMeta(user, {}, user.trainings, req.user);
 
   req.db.users.push(user);
   logFluctuation(req.db, user, "Eingestellt", req.user);
@@ -715,15 +761,36 @@ app.patch("/api/users/:id", requireAuth, requireRole("Direktion"), (req, res) =>
 
   const before = publicUser(user);
   const rankChanged = Number(user.rank) !== Number(normalized.value.rank);
+  const beforeTrainings = { ...(user.trainings || {}) };
   Object.assign(user, normalized.value, {
     lastPromotionAt: rankChanged ? todayIso() : user.lastPromotionAt,
     updatedAt: nowIso()
   });
+  updateTrainingMeta(user, beforeTrainings, user.trainings, req.user);
 
   const after = publicUser(user);
   logAction(req.db, req.user, "Benutzer bearbeitet", `${user.firstName} ${user.lastName}`.trim(), { before, after, description: userChangeSummary(req.db, before, after) });
   writeDb(req.db);
   res.json({ user: publicUser(user) });
+});
+
+app.post("/api/training/est/:id", requireAuth, (req, res) => {
+  const user = req.db.users.find((item) => item.id === req.params.id && !item.terminated);
+  if (!user) return res.status(404).json({ error: "Benutzer nicht gefunden." });
+  const trainingDepartment = getDepartment(req.db, "training-recruitment");
+  if (!canManageDepartmentAction(req.user, trainingDepartment, req.db, "departmentLeadership")) {
+    return res.status(403).json({ error: "Keine Berechtigung." });
+  }
+  if (user.trainings?.EST) return res.json({ user: publicUser(user) });
+  const before = publicUser(user);
+  const beforeTrainings = { ...(user.trainings || {}) };
+  user.trainings = { ...Object.fromEntries(trainingNames.map((training) => [training, false])), ...(user.trainings || {}), EST: true };
+  updateTrainingMeta(user, beforeTrainings, user.trainings, req.user);
+  user.updatedAt = nowIso();
+  const after = publicUser(user);
+  logAction(req.db, req.user, "Ausbildung EST hinzugefügt", `${user.firstName} ${user.lastName}`.trim(), { before, after, description: "EST nach bestandener Prüfung vergeben" });
+  writeDb(req.db);
+  res.json({ user: after });
 });
 
 app.patch("/api/settings/uprank-rules", requireAuth, requireRole("Direktion"), (req, res) => {
@@ -873,6 +940,7 @@ app.post("/api/users/:id/rehire", requireAuth, requireRole("Direktion"), (req, r
   const firstName = String(req.body.firstName || user.firstName || "").trim();
   const lastName = String(req.body.lastName || user.lastName || "").trim();
   const phone = String(req.body.phone || user.phone || "").trim();
+  const joinedAt = String(req.body.joinedAt || todayIso()).slice(0, 10);
   const requestedRole = roles.includes(req.body.role) ? req.body.role : user.role;
   const roleCheck = protectItRoleChange(req.user, user.role, requestedRole);
   if (roleCheck.error) return res.status(403).json({ error: roleCheck.error });
@@ -890,9 +958,13 @@ app.post("/api/users/:id/rehire", requireAuth, requireRole("Direktion"), (req, r
   user.phone = phone;
   user.role = role;
   user.baseRole = baseRole;
+  user.teamler = Boolean(req.body.teamler);
   user.dn = dn;
   user.rank = rank;
+  user.joinedAt = joinedAt;
+  const beforeTrainings = { ...(user.trainings || {}) };
   user.trainings = { ...Object.fromEntries(trainingNames.map((training) => [training, false])), ...(req.body.trainings || user.termination?.oldTrainings || user.trainings || {}) };
+  updateTrainingMeta(user, beforeTrainings, user.trainings, req.user);
   user.rehiredAt = nowIso();
   user.updatedAt = nowIso();
   logFluctuation(req.db, user, "Eingestellt", req.user);
@@ -1102,6 +1174,18 @@ app.patch("/api/it/devmode", requireAuth, requireRole("IT"), (req, res) => {
   const before = Boolean(req.db.settings.devMode);
   req.db.settings.devMode = Boolean(req.body.devMode);
   logAction(req.db, req.user, req.db.settings.devMode ? "Devmode aktiviert" : "Devmode deaktiviert", "IT", { before, after: req.db.settings.devMode });
+  writeDb(req.db);
+  res.json({ settings: req.db.settings });
+});
+
+app.patch("/api/it/restarts", requireAuth, requireRole("IT"), (req, res) => {
+  const before = req.db.settings.restartTimes || [];
+  const restartTimes = Array.isArray(req.body.restartTimes) ? req.body.restartTimes : [];
+  req.db.settings.restartTimes = [...new Set(restartTimes
+    .map((time) => String(time || "").trim())
+    .filter((time) => /^\d{2}:\d{2}$/.test(time)))]
+    .sort();
+  logAction(req.db, req.user, "Restartzeiten geändert", "IT", { before, after: req.db.settings.restartTimes });
   writeDb(req.db);
   res.json({ settings: req.db.settings });
 });
@@ -1354,8 +1438,11 @@ app.delete("/api/notes/:id", requireAuth, requirePermission("actions", "manageNo
 
 app.post("/api/duty/start", requireAuth, (req, res) => {
   const status = String(req.body.status || "");
-  if (!["Innendienst", "Außendienst", "Undercover Dienst"].includes(status)) {
+  if (!["Innendienst", "Außendienst", "Undercover Dienst", "Admin Dienst"].includes(status)) {
     return res.status(400).json({ error: "Ungueltiger Dienststatus." });
+  }
+  if (status === "Admin Dienst" && !req.user.teamler && (rolePower[req.user.role] || 0) < rolePower.IT) {
+    return res.status(403).json({ error: "Admin Dienst ist nur für Teamler freigegeben." });
   }
   if (req.db.duty.some((entry) => entry.userId === req.user.id)) {
     return res.status(400).json({ error: "Du bist bereits im Dienst." });
@@ -1371,6 +1458,29 @@ app.post("/api/duty/start", requireAuth, (req, res) => {
   logAction(req.db, req.user, "Dienst gestartet", status, { after: entry });
   writeDb(req.db);
   res.status(201).json({ entry });
+});
+
+app.post("/api/duty/switch", requireAuth, (req, res) => {
+  const status = String(req.body.status || "");
+  if (!["Innendienst", "Außendienst", "Undercover Dienst", "Admin Dienst"].includes(status)) {
+    return res.status(400).json({ error: "Ungueltiger Dienststatus." });
+  }
+  if (status === "Admin Dienst" && !req.user.teamler && (rolePower[req.user.role] || 0) < rolePower.IT) {
+    return res.status(403).json({ error: "Admin Dienst ist nur für Teamler freigegeben." });
+  }
+  const active = req.db.duty.find((entry) => entry.userId === req.user.id);
+  if (!active) return res.status(400).json({ error: "Du bist aktuell nicht im Dienst." });
+  const before = { ...active };
+  active.status = status;
+  active.switchedAt = nowIso();
+  const history = req.db.dutyHistory.find((entry) => entry.id === active.id) || req.db.dutyHistory.find((entry) => entry.userId === req.user.id && !entry.endedAt);
+  if (history) {
+    history.status = status;
+    history.switchedAt = active.switchedAt;
+  }
+  logAction(req.db, req.user, "Dienst umgetragen", status, { before, after: active });
+  writeDb(req.db);
+  res.json({ entry: active });
 });
 
 app.post("/api/duty/stop", requireAuth, (req, res) => {
@@ -1433,6 +1543,96 @@ app.delete("/api/duty/history/:id", requireAuth, requirePermission("actions", "m
   logAction(req.db, req.user, "Dienstzeit entfernt", entry?.status || req.params.id, { before: entry || null });
   writeDb(req.db);
   res.json({ ok: true });
+});
+
+function endAllActiveDuty(db, actor, action = "Alle Dienste beendet") {
+  const endedAt = nowIso();
+  db.duty.forEach((active) => {
+    const history = db.dutyHistory.find((entry) => entry.id === active.id) || db.dutyHistory.find((entry) => entry.userId === active.userId && !entry.endedAt);
+    if (history) history.endedAt = endedAt;
+    else db.dutyHistory.push({ ...active, endedAt, manual: false });
+  });
+  const count = db.duty.length;
+  logAction(db, actor, action, "Dienstblatt", { count });
+  db.duty = [];
+  return count;
+}
+
+app.post("/api/seizures", requireAuth, (req, res) => {
+  const suspect = String(req.body.suspect || "").trim();
+  const location = String(req.body.location || "").trim();
+  const numberValue = (value) => Math.max(0, Number(value || 0) || 0);
+  const sourceType = String(req.body.sourceType || "Normal").trim() === "Dealer" ? "Dealer" : "Normal";
+  const evidenceLinks = Array.isArray(req.body.evidenceLinks)
+    ? req.body.evidenceLinks.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(req.body.evidenceLink || req.body.weapons || "").split("\n").map((item) => item.trim()).filter(Boolean);
+  if (!suspect || !location || !evidenceLinks.length) {
+    return res.status(400).json({ error: "Tatverdächtiger, Standort und mindestens ein Beweis sind Pflichtfelder." });
+  }
+  const entry = {
+    id: makeId("seizure"),
+    suspect,
+    location,
+    evidenceLinks,
+    weapons: "",
+    drugs: "",
+    other: "",
+    witness: String(req.body.witness || "").trim(),
+    murder: Boolean(req.body.murder),
+    blackMoney: numberValue(req.body.blackMoney),
+    crates: numberValue(req.body.crates),
+    sourceType,
+    officerId: req.user.id,
+    officerName: actorName(req.user),
+    createdAt: nowIso()
+  };
+  req.db.settings.seizures = Array.isArray(req.db.settings.seizures) ? req.db.settings.seizures : [];
+  req.db.settings.seizures.unshift(entry);
+  logAction(req.db, req.user, "Beschlagnahmung erstellt", suspect, { after: entry });
+  writeDb(req.db);
+  res.status(201).json({ seizure: entry, settings: req.db.settings });
+});
+
+app.patch("/api/seizures/:id", requireAuth, (req, res) => {
+  const entry = req.db.settings.seizures.find((item) => item.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: "Beschlagnahmung nicht gefunden." });
+  const canEditAll = (rolePower[req.user.role] || 0) >= rolePower.Direktion;
+  if (!canEditAll && entry.officerId !== req.user.id) return res.status(403).json({ error: "Keine Berechtigung." });
+  const suspect = String(req.body.suspect || "").trim();
+  const location = String(req.body.location || "").trim();
+  const before = { ...entry };
+  const numberValue = (value) => Math.max(0, Number(value || 0) || 0);
+  const evidenceLinks = Array.isArray(req.body.evidenceLinks)
+    ? req.body.evidenceLinks.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (!suspect || !location || !evidenceLinks.length) return res.status(400).json({ error: "Tatverdächtiger, Standort und mindestens ein Beweis sind Pflichtfelder." });
+  Object.assign(entry, {
+    suspect,
+    location,
+    evidenceLinks,
+    weapons: "",
+    drugs: "",
+    other: "",
+    witness: String(req.body.witness || "").trim(),
+    murder: Boolean(req.body.murder),
+    blackMoney: numberValue(req.body.blackMoney),
+    crates: numberValue(req.body.crates),
+    sourceType: String(req.body.sourceType || "Normal").trim() === "Dealer" ? "Dealer" : "Normal",
+    updatedAt: nowIso(),
+    updatedBy: actorName(req.user)
+  });
+  logAction(req.db, req.user, "Beschlagnahmung bearbeitet", suspect, { before, after: entry });
+  writeDb(req.db);
+  res.json({ seizure: entry, settings: req.db.settings });
+});
+
+app.delete("/api/seizures/:id", requireAuth, requireRole("Direktion"), (req, res) => {
+  const entry = req.db.settings.seizures.find((item) => item.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: "Beschlagnahmung nicht gefunden." });
+  req.db.settings.seizures = req.db.settings.seizures.filter((item) => item.id !== req.params.id);
+  logAction(req.db, req.user, "Beschlagnahmung gelöscht", entry.suspect || req.params.id, { before: entry });
+  writeDb(req.db);
+  res.json({ ok: true, settings: req.db.settings });
 });
 
 app.post("/api/calendar/events", requireAuth, (req, res) => {
@@ -1511,7 +1711,43 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
 
+function currentBerlinRestartWindow() {
+  const parts = new Intl.DateTimeFormat("de-DE", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date()).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`
+  };
+}
+
+function runScheduledRestarts() {
+  try {
+    const db = readDb();
+    const times = db.settings.restartTimes || [];
+    if (!times.length) return;
+    const { date, time } = currentBerlinRestartWindow();
+    if (!times.includes(time)) return;
+    db.settings.restartLastRun = db.settings.restartLastRun || {};
+    if (db.settings.restartLastRun[time] === date) return;
+    const count = endAllActiveDuty(db, { firstName: "System", lastName: "Restart" }, "Restart: Dienste automatisch beendet");
+    db.settings.restartLastRun[time] = date;
+    if (count > 0) writeDb(db);
+    else writeDb(db);
+  } catch (error) {
+    console.error("Restart scheduler failed:", error);
+  }
+}
+
 ensureStorage();
+runScheduledRestarts();
+setInterval(runScheduledRestarts, 30000);
 app.listen(PORT, () => {
   console.log(`LSPD Dienstblatt laeuft auf http://localhost:${PORT}`);
 });

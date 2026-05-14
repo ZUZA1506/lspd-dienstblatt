@@ -1,4 +1,5 @@
 node_modules/
+storage/dienstblatt.json
 storage/*.json
-!storage/.gitkeep
+*.log
 .env

@@ -1,24 +1,24 @@
 ﻿function isDevModeAuthStorage() {
-  return localStorage.getItem("fib_devmode_active") === "1";
+  return localStorage.getItem("lspd_devmode_active") === "1";
 }
 
 function storedAuthToken() {
-  return isDevModeAuthStorage() ? sessionStorage.getItem("fib_token_dev") : localStorage.getItem("fib_token");
+  return isDevModeAuthStorage() ? sessionStorage.getItem("lspd_token_dev") : localStorage.getItem("lspd_token");
 }
 
 function storeAuthToken(token) {
   if (isDevModeAuthStorage()) {
-    sessionStorage.setItem("fib_token_dev", token);
-    localStorage.removeItem("fib_token");
+    sessionStorage.setItem("lspd_token_dev", token);
+    localStorage.removeItem("lspd_token");
   } else {
-    localStorage.setItem("fib_token", token);
-    sessionStorage.removeItem("fib_token_dev");
+    localStorage.setItem("lspd_token", token);
+    sessionStorage.removeItem("lspd_token_dev");
   }
 }
 
 function clearAuthToken() {
-  if (isDevModeAuthStorage()) sessionStorage.removeItem("fib_token_dev");
-  else localStorage.removeItem("fib_token");
+  if (isDevModeAuthStorage()) sessionStorage.removeItem("lspd_token_dev");
+  else localStorage.removeItem("lspd_token");
 }
 
 const state = {
@@ -36,10 +36,10 @@ const state = {
   logs: [],
   disciplinary: [],
   departments: [],
-  page: localStorage.getItem("fib_page") || "Dienstblatt",
-  directionTab: localStorage.getItem("fib_direction_tab") || "overview",
-  profileTab: localStorage.getItem("fib_profile_tab") || "Ausbildung",
-  departmentTabs: JSON.parse(localStorage.getItem("fib_department_tabs") || "{}")
+  page: localStorage.getItem("lspd_page") || "Dienstblatt",
+  directionTab: localStorage.getItem("lspd_direction_tab") || "overview",
+  profileTab: localStorage.getItem("lspd_profile_tab") || "Ausbildung",
+  departmentTabs: JSON.parse(localStorage.getItem("lspd_department_tabs") || "{}")
 };
 
 const pages = [
@@ -79,11 +79,11 @@ const adminPages = ["IT", "Direktion"];
 const positionOrder = { "Direktion": 5, "Leitung": 4, "Stv. Leitung": 3, "Mitglied": 2, "Anwärter": 1 };
 const trainingGroups = [
   ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted"],
-  ["EL", "Agent Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II"],
+  ["EL", "Beamtenprüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II"],
   ["Air Support", "Riot", "Coquette"]
 ];
 const trainings = trainingGroups.flat();
-const expandedDepartments = new Set(JSON.parse(localStorage.getItem("fib_expanded_departments") || "[]"));
+const expandedDepartments = new Set(JSON.parse(localStorage.getItem("lspd_expanded_departments") || "[]"));
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let selectedCalendarDate = isoDateLocal(new Date());
 let trainingTimerInterval = null;
@@ -177,16 +177,16 @@ function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
     return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar">`;
   }
-  return `<div class="avatar ${size} avatar-fallback"><span>FIB</span></div>`;
+  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-1" alt="LSPD">`;
 }
 
 function rankLabel(rank) {
   const found = state.ranks.find((item) => Number(item.value) === Number(rank));
-  return found ? found.label : `Template ${rank} - Rang ${rank}`;
+  return found ? found.label : `Rang ${rank}`;
 }
 
 function rankOptionLabel(rank) {
-  const label = String(rank.label || `Template ${rank.value} - Rang ${rank.value}`);
+  const label = String(rank.label || `Rang ${rank.value}`);
   return /\(\d+\)\s*$/.test(label) ? label : `${label} (${rank.value})`;
 }
 
@@ -454,7 +454,7 @@ function successMessage(path, method) {
   if (path.includes("/login")) return "Erfolgreich angemeldet.";
   if (path.includes("/logout")) return "Erfolgreich abgemeldet.";
   if (path.includes("/duty/start")) return "Dienst gestartet.";
-  if (path.includes("/duty/stop-all")) return "Alle Agents wurden ausgetragen.";
+  if (path.includes("/duty/stop-all")) return "Alle Beamten wurden ausgetragen.";
   if (path.includes("/duty/stop")) return "Dienst beendet.";
   if (path.includes("/notes") && method === "POST") return "Notiz erstellt.";
   if (path.includes("/notes") && method === "PATCH") return "Notiz aktualisiert.";
@@ -504,7 +504,7 @@ async function bootstrap() {
   const visiblePages = getVisiblePages();
   if (!visiblePages.includes(state.page)) {
     state.page = "Dienstblatt";
-    localStorage.setItem("fib_page", state.page);
+    localStorage.setItem("lspd_page", state.page);
   }
   renderApp();
 }
@@ -529,13 +529,13 @@ function renderApp() {
 
 function syncDevModeAuthStorage() {
   const active = Boolean(state.settings?.devMode);
-  localStorage.setItem("fib_devmode_active", active ? "1" : "0");
+  localStorage.setItem("lspd_devmode_active", active ? "1" : "0");
   if (active) {
-    if (state.token) sessionStorage.setItem("fib_token_dev", state.token);
-    localStorage.removeItem("fib_token");
+    if (state.token) sessionStorage.setItem("lspd_token_dev", state.token);
+    localStorage.removeItem("lspd_token");
   } else {
-    if (state.token) localStorage.setItem("fib_token", state.token);
-    sessionStorage.removeItem("fib_token_dev");
+    if (state.token) localStorage.setItem("lspd_token", state.token);
+    sessionStorage.removeItem("lspd_token_dev");
   }
 }
 
@@ -573,7 +573,7 @@ function renderNavigation() {
   document.querySelectorAll(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
       state.page = button.dataset.page;
-      localStorage.setItem("fib_page", state.page);
+      localStorage.setItem("lspd_page", state.page);
       renderApp();
     });
   });
@@ -633,7 +633,7 @@ function renderDienstblatt() {
     </section>
 
     <section class="grid-4 dashboard-stats">
-      <div class="stat-card"><span>Aktive Agents</span><i>${iconSvg("Einsatzzentrale")}</i><strong>${agents}</strong><small>Im Einsatz</small></div>
+      <div class="stat-card"><span>Aktive Beamte</span><i>${iconSvg("Einsatzzentrale")}</i><strong>${agents}</strong><small>Im Einsatz</small></div>
       <div class="stat-card"><span>Undercover Dienst</span><i>${iconSvg("Mitglieder")}</i><strong>${undercover}</strong><small>Zivil Einheit</small></div>
       <div class="stat-card"><span>Innendienst</span><i>${iconSvg("Abteilungen")}</i><strong>${state.duty.filter((entry) => entry.status === "Innendienst").length}</strong><small>Im Büro</small></div>
       <div class="stat-card"><span>Außendienst</span><i>${iconSvg("Kalender")}</i><strong>${state.duty.filter((entry) => entry.status === "Außendienst").length}</strong><small>Auf Streife</small></div>
@@ -651,7 +651,7 @@ function renderDienstblatt() {
 
     <section class="panel">
       <div class="panel-header">
-        <h3><span class="section-icon">♙</span>Aktive Agents</h3>
+        <h3><span class="section-icon">♙</span>Aktive Beamte</h3>
         <div class="button-row">
           <button class="blue-btn action-btn" id="startDutyBtn"><span>+</span> Eintragen</button>
           <button class="red-btn action-btn" id="stopDutyBtn"><span>${iconSvg("Profil")}</span> Austragen</button>
@@ -1044,7 +1044,7 @@ function renderDirektion() {
   document.querySelectorAll("[data-direction-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.directionTab = button.dataset.directionTab;
-      localStorage.setItem("fib_direction_tab", state.directionTab);
+      localStorage.setItem("lspd_direction_tab", state.directionTab);
       renderDirektion();
     });
   });
@@ -1052,7 +1052,7 @@ function renderDirektion() {
   $("#addManualDutyBtn")?.addEventListener("click", openManualDutyModal);
   $("#removeManualDutyBtn")?.addEventListener("click", openRemoveDutyHoursModal);
   $("#hoursUserSelect")?.addEventListener("change", (event) => {
-    localStorage.setItem("fib_hours_user", event.target.value);
+    localStorage.setItem("lspd_hours_user", event.target.value);
     renderDirektion();
   });
   document.querySelectorAll(".department-add").forEach((button) => button.addEventListener("click", () => openDepartmentMemberModal(directionDepartment)));
@@ -1064,7 +1064,7 @@ function renderDirektion() {
   document.querySelectorAll(".uprank-shorten").forEach((button) => button.addEventListener("click", () => openUprankAdjustmentModal(findAnyUser(button.dataset.id), "Verkürzung")));
   document.querySelectorAll(".uprank-special").forEach((button) => button.addEventListener("click", () => openUprankAdjustmentModal(findAnyUser(button.dataset.id), "Sonderuprank")));
   $("#uprankSearch")?.addEventListener("input", (event) => {
-    localStorage.setItem("fib_uprank_search", event.target.value);
+    localStorage.setItem("lspd_uprank_search", event.target.value);
     updateUprankList();
   });
   $("#uprankRulesForm")?.addEventListener("submit", saveUprankRules);
@@ -1300,7 +1300,7 @@ function renderDirectionFluctuationPanel() {
 
 function renderDirectionHoursPanel() {
   const rows = state.dutyHistory || [];
-  const selectedUserId = localStorage.getItem("fib_hours_user") || "all";
+  const selectedUserId = localStorage.getItem("lspd_hours_user") || "all";
   const scopedRows = selectedUserId === "all" ? rows : rows.filter((entry) => entry.userId === selectedUserId);
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1408,7 +1408,7 @@ function renderDirectionUpranksPanel() {
   const weekStart = new Date(now);
   weekStart.setDate(now.getDate() - 7);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const searchValue = localStorage.getItem("fib_uprank_search") || "";
+  const searchValue = localStorage.getItem("lspd_uprank_search") || "";
   const searchTerm = searchValue.trim().toLowerCase();
   const allRows = state.users
     .filter((user) => !user.terminated && Number(user.rank) < Math.max(...state.ranks.map((rank) => Number(rank.value))))
@@ -1588,7 +1588,7 @@ function renderLogsPanel() {
 
 function renderFluctuation() {
   const rows = state.settings.fluctuation || [];
-  const selectedRange = localStorage.getItem("fib_fluctuation_range") || "Monat";
+  const selectedRange = localStorage.getItem("lspd_fluctuation_range") || "Monat";
   const from = rangeStart(selectedRange);
   const rangeRows = rows.filter((row) => !from || new Date(row.createdAt) >= from);
   const monthLabel = new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" });
@@ -1643,7 +1643,7 @@ function renderFluctuation() {
     </section>
   `;
   $("#fluctuationRange").addEventListener("change", (event) => {
-    localStorage.setItem("fib_fluctuation_range", event.target.value);
+    localStorage.setItem("lspd_fluctuation_range", event.target.value);
     renderFluctuation();
   });
 }
@@ -1699,7 +1699,7 @@ function departmentTab(department) {
 
 function setDepartmentTab(department, tab) {
   state.departmentTabs = { ...(state.departmentTabs || {}), [department.id]: tab };
-  localStorage.setItem("fib_department_tabs", JSON.stringify(state.departmentTabs));
+  localStorage.setItem("lspd_department_tabs", JSON.stringify(state.departmentTabs));
 }
 
 function renderPermissionPickList(type, items, selected = []) {
@@ -1707,7 +1707,7 @@ function renderPermissionPickList(type, items, selected = []) {
     role: "z.B. User, Supervisor, Direktion",
     department: "z.B. SWAT, Training, Metro",
     position: "z.B. Leitung, Stv. Leitung, Anwärter",
-    rank: "z.B. 0, 5, Sergeant, Director",
+    rank: "z.B. 0, 5, Sergeant, Chief",
     user: "z.B. Name, Dienstnummer, Alexa"
   };
   return `
@@ -1932,7 +1932,7 @@ function renderIT() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "fib-dienstblatt-export.json";
+    link.download = "lspd-dienstblatt-export.json";
     link.click();
     URL.revokeObjectURL(url);
   });
@@ -1983,7 +1983,7 @@ function openDataImportModal() {
         const data = await api("/api/it/import", { method: "POST", body: JSON.stringify({ db }) });
         state.token = "";
         state.currentUser = null;
-        authStorage().removeItem("fibToken");
+        authStorage().removeItem("lspdToken");
         closeModal();
         showNotify(`Import abgeschlossen: ${data.users} Benutzer importiert. Bitte neu einloggen.`, "success");
         window.setTimeout(() => window.location.reload(), 900);
@@ -2214,7 +2214,7 @@ function renderDepartmentsOverview() {
       const id = button.dataset.departmentId;
       if (expandedDepartments.has(id)) expandedDepartments.delete(id);
       else expandedDepartments.add(id);
-      localStorage.setItem("fib_expanded_departments", JSON.stringify([...expandedDepartments]));
+      localStorage.setItem("lspd_expanded_departments", JSON.stringify([...expandedDepartments]));
       renderDepartmentsOverview();
     });
   });
@@ -2295,14 +2295,14 @@ function renderDepartmentPage(department) {
   document.querySelectorAll(".dept-note-add").forEach((button) => button.addEventListener("click", () => openDepartmentNoteModal(department)));
   document.querySelectorAll(".dept-member-note-add").forEach((button) => button.addEventListener("click", () => openDepartmentMemberNoteModal(department, button.dataset.userId)));
   $("#leadershipSearch")?.addEventListener("input", (event) => {
-    localStorage.setItem(`fib_leadership_search_${department.id}`, event.target.value);
+    localStorage.setItem(`lspd_leadership_search_${department.id}`, event.target.value);
     renderDepartmentPage(department);
     const input = $("#leadershipSearch");
     input?.focus();
     input?.setSelectionRange(input.value.length, input.value.length);
   });
   $("#leadershipRange")?.addEventListener("change", (event) => {
-    localStorage.setItem(`fib_leadership_range_${department.id}`, event.target.value);
+    localStorage.setItem(`lspd_leadership_range_${department.id}`, event.target.value);
     renderDepartmentPage(department);
   });
   $("#startEstExam")?.addEventListener("click", () => {
@@ -2385,7 +2385,7 @@ function renderDepartmentOverviewPanels(department, canMembers, canNotes) {
 
 function activeEstExamOld() {
   try {
-    return JSON.parse(localStorage.getItem("fib_active_est_exam") || "null");
+    return JSON.parse(localStorage.getItem("lspd_active_est_exam") || "null");
   } catch {
     return null;
   }
@@ -2399,7 +2399,7 @@ function legacyEstModules() {
   ];
 }
 
-const TRAINING_STORE_KEY = "fib_training_exam_store";
+const TRAINING_STORE_KEY = "lspd_training_exam_store";
 
 function makeTrainingId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -3764,7 +3764,7 @@ function openTrainingExamModal(examId, readOnly = false) {
 
 const EST_LOCATION_PROMPTS = [
   "Würfelpark",
-  "FIB HQ",
+  "LSPD HQ",
   "Vespucci Kleidungsladen",
   "EKZ",
   "Ententeich",
@@ -4913,7 +4913,7 @@ function renderNavigation() {
   document.querySelectorAll(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
       state.page = button.dataset.page;
-      localStorage.setItem("fib_page", state.page);
+      localStorage.setItem("lspd_page", state.page);
       renderApp();
     });
   });
@@ -4944,7 +4944,7 @@ function renderNavigation() {
   document.querySelectorAll(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
       state.page = button.dataset.page;
-      localStorage.setItem("fib_page", state.page);
+      localStorage.setItem("lspd_page", state.page);
       renderApp();
     });
   });
@@ -5859,8 +5859,8 @@ function renderCatalogQuestion(question, index, side = "main") {
 }
 
 function renderDepartmentLeadershipPanel(department) {
-  const searchValue = localStorage.getItem(`fib_leadership_search_${department.id}`) || "";
-  const selectedRange = localStorage.getItem(`fib_leadership_range_${department.id}`) || "Gesamt";
+  const searchValue = localStorage.getItem(`lspd_leadership_search_${department.id}`) || "";
+  const selectedRange = localStorage.getItem(`lspd_leadership_range_${department.id}`) || "Gesamt";
   const searchTerm = searchValue.trim().toLowerCase();
   const members = department.members.filter((member) => {
     const haystack = `${fullName(member.user)} ${member.position} ${rankLabel(member.user.rank)} ${member.user.dn || ""}`.toLowerCase();
@@ -6065,7 +6065,7 @@ function renderProfile() {
   document.querySelectorAll("[data-profile-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.profileTab = button.dataset.profileTab;
-      localStorage.setItem("fib_profile_tab", state.profileTab);
+      localStorage.setItem("lspd_profile_tab", state.profileTab);
       renderProfile();
     });
   });
@@ -6599,7 +6599,7 @@ function openStopAllDutyModal() {
     return;
   }
   openModal(`
-    <h3>Alle Agents austragen</h3>
+    <h3>Alle Beamten austragen</h3>
     <p class="muted">Damit werden alle aktiven Dienst-Einträge beendet.</p>
     <p id="modalError" class="form-error"></p>
     <div class="modal-actions">
@@ -7228,7 +7228,7 @@ function openManualDutyModal() {
 }
 
 function openRemoveDutyHoursModal() {
-  const selectedUserId = localStorage.getItem("fib_hours_user") || "all";
+  const selectedUserId = localStorage.getItem("lspd_hours_user") || "all";
   const rows = (state.dutyHistory || []).filter((entry) => selectedUserId === "all" || entry.userId === selectedUserId);
   openModal(`
     <h3>Stunden entfernen</h3>

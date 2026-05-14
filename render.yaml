@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: fib-dienstblatt
+    name: lspd-dienstblatt
     runtime: node
     plan: starter
     buildCommand: npm ci --omit=dev
@@ -11,6 +11,6 @@ services:
       - key: DATA_DIR
         value: /opt/render/project/src/storage
     disk:
-      name: fib-dienstblatt-storage
+      name: lspd-dienstblatt-storage
       mountPath: /opt/render/project/src/storage
       sizeGB: 1

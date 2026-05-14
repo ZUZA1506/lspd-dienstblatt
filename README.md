@@ -1,4 +1,4 @@
-# FIB Dienstblatt
+# LSPD Dienstblatt
 
 Node.js/Express Dienstblatt mit statischem Frontend und JSON-Speicher.
 

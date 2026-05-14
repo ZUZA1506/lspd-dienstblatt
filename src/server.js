@@ -9,13 +9,27 @@ const ROOT = path.resolve(__dirname, "..");
 const STORAGE_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, "storage");
 const DB_FILE = path.join(STORAGE_DIR, "dienstblatt.json");
 const PUBLIC_DIR = path.join(ROOT, "public");
-const DEFAULT_PASSWORD = "FIB12345";
+const DEFAULT_PASSWORD = "LSPD12345";
 
 const roles = ["User", "Supervisor", "Direktion", "IT", "IT-Leitung"];
 const rolePower = { User: 1, Supervisor: 2, Direktion: 3, IT: 4, "IT-Leitung": 5 };
-const ranks = Array.from({ length: 13 }, (_, index) => ({
+const ranks = [
+  "Officer in Training",
+  "Probationary Officer",
+  "Police Officer I",
+  "Police Officer II",
+  "Senior Lead Officer",
+  "Sergeant",
+  "Lieutenant",
+  "Captain",
+  "Commander",
+  "Deputy Chief",
+  "Chief of Staff",
+  "Assistant Chief",
+  "Chief of Police"
+].map((label, index) => ({
   value: index,
-  label: `Template ${index} - Rang ${index}`
+  label: `(${index}) ${label}`
 }));
 
 function defaultRanks() {
@@ -33,7 +47,7 @@ function defaultUprankRules() {
 
 function defaultDepartments() {
   return [
-    makeDepartment("direktion", "Direktion", "FIB Direktion und administrative Leitung", "Offen"),
+    makeDepartment("direktion", "Direktion", "LSPD Direktion und administrative Leitung", "Offen"),
     makeDepartment("training-recruitment", "Training / Recruitment", "Ausbildung, Recruiting und Lernkontrollen", "Offen"),
     makeDepartment("department-corruptions", "Department of Corruptions", "Interne Ermittlungen und Korruptionsdelikte", "Offen"),
     makeDepartment("metro-taskforce", "Metro Taskforce", "Spezialeinsätze und operative Taskforce", "Offen"),
@@ -101,7 +115,7 @@ function normalizePermissions(value = {}) {
 
 const departmentPositions = ["Direktion", "Leitung", "Stv. Leitung", "Mitglied", "Anwärter"];
 const positionPower = { "Direktion": 5, "Leitung": 4, "Stv. Leitung": 3, "Mitglied": 2, "Anwärter": 1 };
-const trainingNames = ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted", "EL", "Agent Prüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II", "Air Support", "Riot", "Coquette"];
+const trainingNames = ["EST", "Wissen", "Fahren", "Schießen", "Verhalten", "Undercover", "Wanted", "EL", "Beamtenprüfung", "Prak. VHF", "Prak. EL I", "Führung", "Prak. EL II", "Air Support", "Riot", "Coquette"];
 
 function nowIso() {
   return new Date().toISOString();
@@ -158,7 +172,7 @@ function ensureStorage() {
       ranks: defaultRanks(),
       navLabels: {},
       departments: defaultDepartments(),
-      informationText: "Hier können später zentrale Informationen für alle Agents gepflegt werden.",
+      informationText: "Hier können später zentrale Informationen für alle Beamten gepflegt werden.",
       applicationStatus: "Offen",
       calendarEvents: [],
       fluctuation: [],
@@ -196,7 +210,7 @@ function readDb() {
   db.settings.ranks = Array.isArray(db.settings.ranks) && db.settings.ranks.length ? db.settings.ranks : defaultRanks();
   db.settings.navLabels = db.settings.navLabels || {};
   db.settings.departments = normalizeDepartments(db.settings.departments);
-  db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Agents gepflegt werden.";
+  db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Beamten gepflegt werden.";
   db.settings.applicationStatus = db.settings.applicationStatus || "Offen";
   if (typeof db.settings.defconText !== "string") db.settings.defconText = "Automatisch / Manuell aktualisierbar";
   db.settings.calendarEvents = Array.isArray(db.settings.calendarEvents) ? db.settings.calendarEvents : [];
@@ -1095,7 +1109,7 @@ app.patch("/api/it/devmode", requireAuth, requireRole("IT"), (req, res) => {
 app.get("/api/it/export", requireAuth, requireRole("IT"), (req, res) => {
   const exportDb = { ...req.db, sessions: [] };
   res.setHeader("Content-Type", "application/json");
-  res.setHeader("Content-Disposition", "attachment; filename=\"fib-dienstblatt-export.json\"");
+  res.setHeader("Content-Disposition", "attachment; filename=\"lspd-dienstblatt-export.json\"");
   res.send(JSON.stringify(exportDb, null, 2));
 });
 
@@ -1499,5 +1513,5 @@ app.get("*", (_req, res) => {
 
 ensureStorage();
 app.listen(PORT, () => {
-  console.log(`FIB Dienstblatt laeuft auf http://localhost:${PORT}`);
+  console.log(`LSPD Dienstblatt laeuft auf http://localhost:${PORT}`);
 });

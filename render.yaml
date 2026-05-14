@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: fib-dienstblatt
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /opt/render/project/src/storage
+    disk:
+      name: fib-dienstblatt-storage
+      mountPath: /opt/render/project/src/storage
+      sizeGB: 1

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="geometricPrecision">
+  <rect x="48" y="48" width="416" height="416" rx="34" fill="none" stroke="#ffffff" stroke-width="38"/>
+  <path fill="#ffffff" d="M338.6 117.4a43 43 0 0 1 60.8 0l-4.2-4.2a43 43 0 0 1 0 60.8L207.6 361.6 112 400l38.4-95.6 188.2-187Zm-159 207-13.2 32.8 32.8-13.2 166.2-166.2-19.6-19.6L179.6 324.4Z"/>
+</svg>

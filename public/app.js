@@ -660,14 +660,22 @@ function renderPasswordChangeRequired() {
   `;
   $("#navigation").innerHTML = "";
   $("#pageTitle").textContent = "Passwort ändern";
-  $("#pageDescription").textContent = "Du musst dein Passwort ändern, bevor du das Dienstblatt nutzen kannst.";
+  $("#rankLine").textContent = "Sicherheitsprüfung";
+  const description = $("#pageDescription");
+  if (description) description.textContent = "Du musst dein Passwort ändern, bevor du das Dienstblatt nutzen kannst.";
+  $("#serviceStatus").textContent = "Passwortwechsel erforderlich";
+  $("#serviceStatus").className = "service-pill off";
   $("#headerIcon").innerHTML = iconSvg("IT");
   $("#headerIcon").classList.remove("hidden");
   renderDevModeBanner();
   content.innerHTML = `
     <section class="panel force-password-panel">
       <h3>Passwort ändern</h3>
-      <p class="muted">Du bist mit dem Standardpasswort angemeldet. Bitte lege jetzt dein eigenes Passwort fest.</p>
+      <p class="muted">Du bist mit dem Standardpasswort angemeldet. Aus Sicherheitsgründen musst du jetzt ein eigenes Passwort festlegen, bevor du das Dienstblatt sehen kannst.</p>
+      <div class="security-note-box">
+        <strong>Passwörter sind geschützt und nicht einsehbar.</strong>
+        <span>Auch die IT kann dein Passwort nicht auslesen. Es kann nur auf das Standardpasswort zurückgesetzt und danach von dir neu gesetzt werden.</span>
+      </div>
       <label>Aktuelles Standardpasswort<input type="password" id="forcedOldPassword" autocomplete="current-password" required></label>
       <label>Neues Passwort<input type="password" id="forcedNewPassword" autocomplete="new-password" required></label>
       <p id="forcedPasswordError" class="form-error"></p>

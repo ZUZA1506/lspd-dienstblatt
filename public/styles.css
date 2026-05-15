@@ -4290,6 +4290,20 @@ table td.text-left {
   gap: 8px;
 }
 
+.security-note-box {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  color: #dcecff;
+  border: 1px solid rgba(99, 168, 255, .36);
+  border-radius: 8px;
+  background: rgba(40, 119, 255, .12);
+}
+
+.security-note-box span {
+  color: #9fb4d0;
+}
+
 .force-password-panel button {
   justify-self: flex-start;
 }

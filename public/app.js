@@ -2068,6 +2068,13 @@ function departmentPositionsFor(department) {
   return [...new Set(positions || [])];
 }
 
+function departmentLeaderPositionsFor(department) {
+  const positions = departmentPositionsFor(department);
+  const fallback = positions.filter((position) => ["Direktion", "Leitung", "Stv. Leitung"].includes(position));
+  const leaders = Array.isArray(department?.leaderPositions) ? department.leaderPositions.filter((position) => positions.includes(position)) : fallback;
+  return [...new Set(leaders.length ? leaders : fallback)];
+}
+
 function positionPowerFor(department, position) {
   const positions = departmentPositionsFor(department);
   const index = positions.indexOf(position);
@@ -2703,12 +2710,13 @@ function pagePermissionActions(page) {
 
 function renderDepartmentPositionManager(department) {
   if (!department) return "";
+  const leaderPositions = departmentLeaderPositionsFor(department);
   return `
     <section class="department-position-manager">
       <div class="permission-row-head">
         <div class="permission-copy">
           <strong>Interne Ränge / Positionen</strong>
-          <small>Abteilungsränge umbenennen, hinzufügen oder entfernen. Vergebene Positionen können erst entfernt werden, wenn kein Mitglied sie mehr hat.</small>
+          <small>Abteilungsränge sortieren, umbenennen und als Leader markieren. Leader haben Zugriff auf Leitung, Notizen und Personalverwaltung.</small>
         </div>
         <button class="ghost-btn" type="button" id="addDepartmentPosition">+ Rang hinzufügen</button>
       </div>
@@ -2717,6 +2725,11 @@ function renderDepartmentPositionManager(department) {
           <label class="department-position-row">
             <span>${escapeHtml(position)}</span>
             <input data-dept-position-old="${escapeHtml(position)}" value="${escapeHtml(position)}" ${position === "Direktion" ? "readonly" : ""}>
+            <label class="leader-position-toggle"><input type="checkbox" data-dept-position-leader ${leaderPositions.includes(position) || position === "Direktion" ? "checked" : ""} ${position === "Direktion" ? "disabled" : ""}><span>Leader</span></label>
+            <span class="position-order-controls">
+              <button class="mini-icon move-department-position" type="button" data-direction="-1" title="Nach oben">${iconSvg("ChevronUp")}</button>
+              <button class="mini-icon move-department-position" type="button" data-direction="1" title="Nach unten">${iconSvg("ChevronDown")}</button>
+            </span>
             <button class="mini-icon danger remove-department-position" type="button" ${position === "Direktion" ? "disabled" : ""}>${actionIcon("delete")}</button>
           </label>
         `).join("")}
@@ -2724,11 +2737,11 @@ function renderDepartmentPositionManager(department) {
     </section>
   `;
 }
-
 function collectDepartmentPositions(modal) {
   return Array.from(modal.querySelectorAll("[data-dept-position-old]")).map((input) => ({
     old: input.dataset.deptPositionOld,
-    label: input.value.trim()
+    label: input.value.trim(),
+    leader: Boolean(input.closest(".department-position-row")?.querySelector("[data-dept-position-leader]")?.checked)
   })).filter((item) => item.label);
 }
 
@@ -2756,6 +2769,11 @@ function openPagePermissionModal(page) {
         <label class="department-position-row">
           <span>Neu</span>
           <input data-dept-position-old="" value="" placeholder="Name des neuen Rangs">
+          <label class="leader-position-toggle"><input type="checkbox" data-dept-position-leader><span>Leader</span></label>
+          <span class="position-order-controls">
+            <button class="mini-icon move-department-position" type="button" data-direction="-1" title="Nach oben">${iconSvg("ChevronUp")}</button>
+            <button class="mini-icon move-department-position" type="button" data-direction="1" title="Nach unten">${iconSvg("ChevronDown")}</button>
+          </span>
           <button class="mini-icon danger remove-department-position" type="button">${actionIcon("delete")}</button>
         </label>
       `);
@@ -2763,6 +2781,13 @@ function openPagePermissionModal(page) {
     modal.addEventListener("click", (event) => {
       const removeButton = event.target.closest(".remove-department-position");
       if (removeButton && !removeButton.disabled) removeButton.closest(".department-position-row")?.remove();
+      const moveButton = event.target.closest(".move-department-position");
+      if (moveButton) {
+        const row = moveButton.closest(".department-position-row");
+        const direction = Number(moveButton.dataset.direction || 0);
+        if (direction < 0 && row?.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
+        if (direction > 0 && row?.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row);
+      }
     });
     modal.querySelector("#savePagePermissions").addEventListener("click", async () => {
       try {

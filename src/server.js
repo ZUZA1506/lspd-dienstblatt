@@ -54,6 +54,7 @@ function makeDepartment(id, name, description, applicationStatus) {
     permits: [],
     factions: [],
     positions: [...departmentPositions],
+    leaderPositions: ["Direktion", "Leitung", "Stv. Leitung"],
     members: [],
     notes: [],
     memberNotes: []
@@ -252,6 +253,7 @@ function normalizeDepartments(existingDepartments) {
       permits: Array.isArray(stored?.permits) ? stored.permits : department.permits,
       factions: Array.isArray(stored?.factions) ? stored.factions : department.factions,
       positions: normalizeDepartmentPositions(stored?.positions || department.positions),
+      leaderPositions: normalizeDepartmentLeaderPositions(stored?.leaderPositions, stored?.positions || department.positions),
       members: Array.isArray(stored?.members) ? stored.members : department.members,
       notes: Array.isArray(stored?.notes) ? stored.notes : department.notes,
       memberNotes: Array.isArray(stored?.memberNotes) ? stored.memberNotes : department.memberNotes
@@ -268,6 +270,7 @@ function normalizeDepartments(existingDepartments) {
       permits: Array.isArray(department.permits) ? department.permits : [],
       factions: Array.isArray(department.factions) ? department.factions : [],
       positions: normalizeDepartmentPositions(department.positions || departmentPositions),
+      leaderPositions: normalizeDepartmentLeaderPositions(department.leaderPositions, department.positions || departmentPositions),
       members: Array.isArray(department.members) ? department.members : [],
       notes: Array.isArray(department.notes) ? department.notes : [],
       memberNotes: Array.isArray(department.memberNotes) ? department.memberNotes : []
@@ -280,8 +283,23 @@ function normalizeDepartmentPositions(value) {
   return incoming.length ? [...new Set(incoming)] : [...departmentPositions];
 }
 
+function normalizeDepartmentLeaderPositions(value, positionsValue = departmentPositions) {
+  const positions = normalizeDepartmentPositions(positionsValue);
+  const fallback = positions.filter((position) => ["Direktion", "Leitung", "Stv. Leitung"].includes(position));
+  const incoming = Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter((item) => positions.includes(item)) : fallback;
+  return [...new Set(incoming.length ? incoming : fallback)];
+}
+
 function departmentPositionsFor(department) {
   return normalizeDepartmentPositions(department?.positions || departmentPositions);
+}
+
+function departmentLeaderPositionsFor(department) {
+  return normalizeDepartmentLeaderPositions(department?.leaderPositions, department?.positions || departmentPositions);
+}
+
+function isDepartmentLeaderPosition(department, position) {
+  return departmentLeaderPositionsFor(department).includes(position);
 }
 
 function positionPowerFor(department, position) {
@@ -470,7 +488,7 @@ function isDepartmentManager(user, department, db = null) {
   if ((rolePower[user.role] || 0) >= rolePower.IT || user.role === "Direktion") return true;
   if (db && hasPermission(user, db, "actions", `departmentManage:${department.id}`, "IT")) return true;
   const membership = department.members.find((member) => member.userId === user.id);
-  return positionPowerFor(department, membership?.position) >= positionPowerFor(department, "Stv. Leitung");
+  return isDepartmentLeaderPosition(department, membership?.position);
 }
 
 function canManageDepartmentAction(user, department, db, action) {
@@ -481,7 +499,7 @@ function canManageDepartmentAction(user, department, db, action) {
   if (action === "departmentLeadership") {
     if ((rolePower[user.role] || 0) >= rolePower.Direktion) return true;
     const membership = department.members.find((member) => member.userId === user.id);
-    return positionPowerFor(department, membership?.position) >= positionPowerFor(department, "Leitung");
+    return isDepartmentLeaderPosition(department, membership?.position);
   }
   return isDepartmentManager(user, department, db);
 }
@@ -1447,7 +1465,8 @@ app.patch("/api/departments/:departmentId/positions", requireAuth, requireRole("
   const normalized = incoming
     .map((item) => ({
       old: String(item.old || "").trim(),
-      label: String(item.label || "").trim()
+      label: String(item.label || "").trim(),
+      leader: Boolean(item.leader)
     }))
     .filter((item) => item.label);
   const nextPositions = [...new Set(normalized.map((item) => item.label))];
@@ -1457,7 +1476,7 @@ app.patch("/api/departments/:departmentId/positions", requireAuth, requireRole("
   const positionInUse = removedPositions.find((position) => department.members.some((member) => member.position === position));
   if (positionInUse) return res.status(400).json({ error: `Die Position ${positionInUse} ist noch vergeben und kann nicht entfernt werden.` });
 
-  const before = [...departmentPositionsFor(department)];
+  const before = { positions: [...departmentPositionsFor(department)], leaderPositions: [...departmentLeaderPositionsFor(department)] };
   normalized.forEach((item) => {
     if (item.old && item.old !== item.label) {
       department.members.forEach((member) => {
@@ -1466,7 +1485,8 @@ app.patch("/api/departments/:departmentId/positions", requireAuth, requireRole("
     }
   });
   department.positions = nextPositions;
-  logAction(req.db, req.user, "Abteilungsränge geändert", department.name, { before, after: department.positions });
+  department.leaderPositions = [...new Set(normalized.filter((item) => item.leader || item.label === "Direktion").map((item) => item.label))].filter((position) => nextPositions.includes(position));
+  logAction(req.db, req.user, "Abteilungsränge geändert", department.name, { before, after: { positions: department.positions, leaderPositions: department.leaderPositions } });
   writeDb(req.db);
   res.json({ department: publicDepartment(department, req.db, req.user) });
 });

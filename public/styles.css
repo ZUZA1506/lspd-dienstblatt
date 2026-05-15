@@ -4390,7 +4390,25 @@ table td.text-left {
 }
 
 .department-position-row {
-  grid-template-columns: minmax(180px, .7fr) minmax(240px, 1fr) auto;
+  grid-template-columns: minmax(150px, .6fr) minmax(220px, 1fr) auto auto auto;
+}
+
+.leader-position-toggle,
+.position-order-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.leader-position-toggle {
+  color: #cfe1fb;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.leader-position-toggle input {
+  accent-color: #2877ff;
 }
 
 .permission-panel {

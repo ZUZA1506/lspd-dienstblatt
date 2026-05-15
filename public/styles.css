@@ -4279,6 +4279,21 @@ table td.text-left {
   margin: 0;
 }
 
+.force-password-panel {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+}
+
+.force-password-panel label {
+  display: grid;
+  gap: 8px;
+}
+
+.force-password-panel button {
+  justify-self: flex-start;
+}
+
 .it-member-row,
 .department-position-row {
   display: grid;

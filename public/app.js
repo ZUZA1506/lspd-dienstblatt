@@ -639,10 +639,57 @@ function showApp() {
 
 function renderApp() {
   showApp();
+  if (state.currentUser?.mustChangePassword) {
+    renderPasswordChangeRequired();
+    return;
+  }
   renderNavigation();
   renderTopbar();
   renderDevModeBanner();
   renderPage();
+}
+
+function renderPasswordChangeRequired() {
+  $(".profile-card").innerHTML = `
+    ${avatarMarkup(state.currentUser, "lg")}
+    <div class="profile-copy">
+      <strong>${escapeHtml(fullName())}</strong>
+      <span>Passwortwechsel erforderlich</span>
+      <em class="off">Gesperrte Ansicht</em>
+    </div>
+  `;
+  $("#navigation").innerHTML = "";
+  $("#pageTitle").textContent = "Passwort ändern";
+  $("#pageDescription").textContent = "Du musst dein Passwort ändern, bevor du das Dienstblatt nutzen kannst.";
+  $("#headerIcon").innerHTML = iconSvg("IT");
+  $("#headerIcon").classList.remove("hidden");
+  renderDevModeBanner();
+  content.innerHTML = `
+    <section class="panel force-password-panel">
+      <h3>Passwort ändern</h3>
+      <p class="muted">Du bist mit dem Standardpasswort angemeldet. Bitte lege jetzt dein eigenes Passwort fest.</p>
+      <label>Aktuelles Standardpasswort<input type="password" id="forcedOldPassword" autocomplete="current-password" required></label>
+      <label>Neues Passwort<input type="password" id="forcedNewPassword" autocomplete="new-password" required></label>
+      <p id="forcedPasswordError" class="form-error"></p>
+      <button class="orange-btn" id="saveForcedPassword" type="button">Passwort speichern</button>
+    </section>
+  `;
+  $("#saveForcedPassword")?.addEventListener("click", saveForcedPassword);
+}
+
+async function saveForcedPassword() {
+  const oldPassword = $("#forcedOldPassword")?.value || "";
+  const newPassword = $("#forcedNewPassword")?.value || "";
+  if (!newPassword) {
+    $("#forcedPasswordError").textContent = "Bitte ein neues Passwort eintragen.";
+    return;
+  }
+  try {
+    await api("/api/profile/password", { method: "PATCH", body: JSON.stringify({ oldPassword, newPassword }) });
+    await bootstrap();
+  } catch (error) {
+    $("#forcedPasswordError").textContent = error.message;
+  }
 }
 
 function syncDevModeAuthStorage() {
@@ -2263,15 +2310,15 @@ function renderIT() {
           <div><h3>Mitglieder</h3><p class="muted">Accounts, Ränge und IT-Zugänge direkt im IT-Blatt bearbeiten.</p></div>
           <button class="blue-btn" id="itCreateMember" type="button">Neues Mitglied einstellen</button>
         </div>
-        <form id="defaultPasswordForm" class="it-password-panel">
+        <div id="defaultCredentialPanel" class="it-password-panel" autocomplete="off">
           <div>
             <strong>Standardpasswort</strong>
             <small>Neue Accounts bekommen dieses Passwort automatisch. Einzelne Accounts kannst du unten darauf zurücksetzen.</small>
           </div>
-          <input id="defaultPasswordInput" type="password" minlength="6" autocomplete="new-password" placeholder="Neues Standardpasswort">
-          <button class="blue-btn" type="submit">Standardpasswort speichern</button>
-          <p id="defaultPasswordMessage" class="muted"></p>
-        </form>
+          <input id="defaultCredentialValue" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="Neues Standardpasswort">
+          <button class="blue-btn" id="saveDefaultCredential" type="button">Standardpasswort speichern</button>
+          <p id="defaultCredentialMessage" class="muted"></p>
+        </div>
         <div class="it-member-list">
           ${state.users.map((user) => `
             <div class="it-member-row">
@@ -2360,7 +2407,7 @@ function renderIT() {
   $("#addRank")?.addEventListener("click", openAddRankModal);
   $("#removeRank")?.addEventListener("click", openRemoveRankModal);
   $("#itCreateMember")?.addEventListener("click", () => openUserModal());
-  $("#defaultPasswordForm")?.addEventListener("submit", saveDefaultPassword);
+  $("#saveDefaultCredential")?.addEventListener("click", saveDefaultPassword);
   document.querySelectorAll(".it-edit-member").forEach((button) => button.addEventListener("click", () => openUserModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".reset-member-password").forEach((button) => button.addEventListener("click", () => openResetPasswordModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".page-permission-open").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
@@ -2434,14 +2481,13 @@ async function saveRestartTimes(times) {
   renderIT();
 }
 
-async function saveDefaultPassword(event) {
-  event.preventDefault();
-  const input = $("#defaultPasswordInput");
-  const message = $("#defaultPasswordMessage");
+async function saveDefaultPassword() {
+  const input = $("#defaultCredentialValue");
+  const message = $("#defaultCredentialMessage");
   const defaultPassword = input?.value.trim() || "";
-  if (defaultPassword.length < 6) {
+  if (!defaultPassword) {
     if (message) {
-      message.textContent = "Mindestens 6 Zeichen eintragen.";
+      message.textContent = "Bitte ein Standardpasswort eintragen.";
       message.className = "form-error";
     }
     return;
@@ -7082,7 +7128,7 @@ function openPasswordModal() {
   openModal(`
     <h3>Passwort ändern</h3>
     <label>Altes Passwort<input type="password" id="oldPassword" required></label>
-    <label>Neues Passwort<input type="password" id="newPassword" required minlength="6"></label>
+    <label>Neues Passwort<input type="password" id="newPassword" required></label>
     <p id="modalError" class="form-error"></p>
     <div class="modal-actions">
       <button class="ghost-btn" data-close>Abbrechen</button>

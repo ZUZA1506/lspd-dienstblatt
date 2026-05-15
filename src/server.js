@@ -145,6 +145,7 @@ function ensureStorage() {
         joinedAt: todayIso(),
         lastPromotionAt: todayIso(),
         passwordHash: hashPassword(DEFAULT_PASSWORD),
+        mustChangePassword: false,
         avatarUrl: "",
         locked: false,
         createdAt,
@@ -834,6 +835,7 @@ app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {
     trainings: { ...Object.fromEntries(trainingNames.map((training) => [training, false])), ...normalized.value.trainings },
     lastPromotionAt: todayIso(),
     passwordHash: hashPassword(req.db.settings.defaultPassword || DEFAULT_PASSWORD),
+    mustChangePassword: true,
     avatarUrl: "",
     locked: false,
     accountStatus: "Aktiv",
@@ -1176,8 +1178,9 @@ app.patch("/api/profile/password", requireAuth, (req, res) => {
   const oldPassword = String(req.body.oldPassword || "");
   const newPassword = String(req.body.newPassword || "");
   if (req.user.passwordHash !== hashPassword(oldPassword)) return res.status(400).json({ error: "Altes Passwort stimmt nicht." });
-  if (newPassword.length < 6) return res.status(400).json({ error: "Neues Passwort muss mindestens 6 Zeichen haben." });
+  if (!newPassword) return res.status(400).json({ error: "Neues Passwort darf nicht leer sein." });
   req.user.passwordHash = hashPassword(newPassword);
+  req.user.mustChangePassword = false;
   req.user.updatedAt = nowIso();
   logAction(req.db, req.user, "Passwort geändert", `${req.user.firstName} ${req.user.lastName}`.trim());
   writeDb(req.db);
@@ -1356,7 +1359,7 @@ app.patch("/api/it/permissions", requireAuth, requireRole("IT"), (req, res) => {
 
 app.patch("/api/it/default-password", requireAuth, requireRole("IT"), (req, res) => {
   const defaultPassword = String(req.body.defaultPassword || "").trim();
-  if (defaultPassword.length < 6) return res.status(400).json({ error: "Das Standardpasswort muss mindestens 6 Zeichen haben." });
+  if (!defaultPassword) return res.status(400).json({ error: "Das Standardpasswort darf nicht leer sein." });
   const beforeSet = Boolean(req.db.settings.defaultPassword);
   req.db.settings.defaultPassword = defaultPassword;
   logAction(req.db, req.user, "Standardpasswort geändert", "IT", { beforeSet, afterSet: true });
@@ -1368,8 +1371,9 @@ app.post("/api/it/users/:id/reset-password", requireAuth, requireRole("IT"), (re
   const user = req.db.users.find((item) => item.id === req.params.id && !item.terminated);
   if (!user) return res.status(404).json({ error: "Benutzer nicht gefunden." });
   const defaultPassword = String(req.db.settings.defaultPassword || DEFAULT_PASSWORD);
-  if (defaultPassword.length < 6) return res.status(400).json({ error: "Es ist kein gültiges Standardpasswort hinterlegt." });
+  if (!defaultPassword) return res.status(400).json({ error: "Es ist kein gültiges Standardpasswort hinterlegt." });
   user.passwordHash = hashPassword(defaultPassword);
+  user.mustChangePassword = true;
   user.updatedAt = nowIso();
   logAction(req.db, req.user, "Passwort zurückgesetzt", actorName(user), { userId: user.id });
   writeDb(req.db);

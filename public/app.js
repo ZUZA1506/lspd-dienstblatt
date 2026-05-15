@@ -682,7 +682,7 @@ function renderNavigation() {
     <button class="nav-btn ${state.page === page ? "active" : ""}" data-page="${escapeHtml(page)}">
       <span class="nav-icon">${iconSvg(page)}</span>
       <span class="nav-label">${escapeHtml(navLabel(page))}</span>
-      ${isInternalSheetPage(page) && isPageViewRestricted(page) ? `<span class="nav-hidden-eye" title="Geschütztes internes Blatt">${iconSvg("Lock")}</span>` : ""}
+      ${restrictedPageIcon(page)}
     </button>
   `).join("");
 
@@ -1969,6 +1969,20 @@ function isPageViewRestricted(page) {
   return !Boolean(permissionRule("pages", page).all);
 }
 
+function restrictedPageIcon(page) {
+  if (!isPageViewRestricted(page)) return "";
+  const icon = isInternalSheetPage(page) ? "Lock" : "EyeOff";
+  const title = isInternalSheetPage(page) ? "Geschütztes internes Blatt" : "Ausgeblendeter Reiter";
+  return `<span class="nav-hidden-eye" title="${title}">${iconSvg(icon)}</span>`;
+}
+
+function restrictedPageEditIcon(page) {
+  if (!isPageViewRestricted(page)) return "";
+  const icon = isInternalSheetPage(page) ? "Lock" : "EyeOff";
+  const title = isInternalSheetPage(page) ? "Ansehen ist eingeschränkt" : "Reiter ist ausgeblendet";
+  return `<span class="page-lock" title="${title}">${iconSvg(icon)}</span>`;
+}
+
 function departmentActionAllowed(department, action) {
   if (!department) return false;
   const key = `${action}:${department.id}`;
@@ -2227,7 +2241,7 @@ function renderIT() {
             ${isInternalSheetPage(page) && !isInternalSheetPage(editablePages[index - 1] || "") ? `<div class="edit-section-divider"><span>Abteilungsblätter</span><small>Direktion, IT und Abteilungen mit eigenen Rechten für Ansicht, Personal, Notizen und interne Buttons.</small></div>` : ""}
             <label class="edit-row">
               <span class="edit-icon">${iconSvg(page)}</span>
-              <span class="edit-name">${isPageViewRestricted(page) ? `<span class="page-lock" title="Ansehen ist eingeschränkt">${iconSvg("Lock")}</span>` : ""}${escapeHtml(isDepartmentPage(page) ? navLabel(page) : page)}</span>
+              <span class="edit-name">${restrictedPageEditIcon(page)}${escapeHtml(isDepartmentPage(page) ? navLabel(page) : page)}</span>
               <input data-nav-key="${escapeHtml(page)}" value="${escapeHtml(navLabel(page))}">
               <span class="page-order-controls">
                 <button class="mini-icon page-move" type="button" data-page-key="${escapeHtml(page)}" data-direction="-1" title="Nach oben">${iconSvg("ChevronUp")}</button>
@@ -5740,7 +5754,7 @@ function renderNavigation() {
       <span class="nav-icon">${iconSvg(page)}</span>
       <span class="nav-label">${escapeHtml(navLabel(page))}</span>
       ${page === "Postfach" && unreadMail ? `<span class="nav-badge">${unreadMail}</span>` : ""}
-      ${isInternalSheetPage(page) && isPageViewRestricted(page) ? `<span class="nav-hidden-eye" title="Geschütztes internes Blatt">${iconSvg("Lock")}</span>` : ""}
+      ${restrictedPageIcon(page)}
     </button>
   `).join("");
 
@@ -5772,7 +5786,7 @@ function renderNavigation() {
     <button class="nav-btn ${state.page === page ? "active" : ""}" data-page="${escapeHtml(page)}">
       <span class="nav-icon">${iconSvg(page)}${page === "Postfach" && unreadMail ? `<span class="nav-badge">${unreadMail}</span>` : ""}</span>
       <span class="nav-label">${escapeHtml(navLabel(page))}</span>
-      ${isInternalSheetPage(page) && isPageViewRestricted(page) ? `<span class="nav-hidden-eye" title="Geschütztes internes Blatt">${iconSvg("Lock")}</span>` : ""}
+      ${restrictedPageIcon(page)}
     </button>
   `).join("");
 

@@ -445,6 +445,9 @@ function syncDirektionMembership(db, user, options = {}) {
   const hasDirektionRole = !user.terminated && user.role === "Direktion";
   if (options.roleAssigned) user.direktionManualRemoved = false;
   if (hasDirektionRole) {
+    db.settings.departments.forEach((item) => {
+      if (item.id !== "direktion") item.members = item.members.filter((member) => !(member.userId === user.id && member.position === "Direktion"));
+    });
     if (user.direktionManualRemoved) return;
     if (!department.members.some((member) => member.userId === user.id)) {
       department.members.push({
@@ -692,7 +695,7 @@ app.use(express.static(PUBLIC_DIR, {
 
 app.get("/api/evidence-preview", (req, res) => {
   const url = String(req.query.url || "");
-  if (!/^https:\/\/(?:www\.)?prnt\.sc\//i.test(url)) return res.status(400).end();
+  if (!/^https:\/\/(?:www\.)?(?:prnt\.sc|gyazo\.com)\//i.test(url)) return res.status(400).end();
   https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (remote) => {
     let body = "";
     remote.setEncoding("utf8");
@@ -702,6 +705,7 @@ app.get("/api/evidence-preview", (req, res) => {
         || body.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
       const imageUrl = match?.[1] || "";
       if (!/^https?:\/\//i.test(imageUrl) || /st\.prntscr\.com\//i.test(imageUrl)) return res.status(404).end();
+      if (/gyazo\.com\//i.test(url) && !/^https:\/\/i\.gyazo\.com\//i.test(imageUrl)) return res.status(404).end();
       res.redirect(imageUrl);
     });
   }).on("error", () => res.status(404).end());
@@ -1487,7 +1491,9 @@ app.post("/api/departments/:departmentId/members", requireAuth, (req, res) => {
   const department = getDepartment(req.db, req.params.departmentId);
   if (!canManageDepartmentAction(req.user, department, req.db, "departmentMembers")) return res.status(403).json({ error: "Keine Berechtigung." });
   const userId = String(req.body.userId || "");
-  const position = departmentPositionsFor(department).includes(req.body.position) ? req.body.position : "Mitglied";
+  const fallbackPosition = departmentPositionsFor(department).includes("Anwärter") ? "Anwärter" : "Mitglied";
+  const requestedPosition = departmentPositionsFor(department).includes(req.body.position) ? req.body.position : fallbackPosition;
+  const position = department.id !== "direktion" && requestedPosition === "Direktion" ? fallbackPosition : requestedPosition;
   if (!canAssignDepartmentPosition(req.user, department, position, req.db)) return res.status(403).json({ error: "Diese Position darfst du nicht vergeben." });
   const addedUser = req.db.users.find((user) => user.id === userId);
   if (!addedUser) return res.status(404).json({ error: "Benutzer nicht gefunden." });

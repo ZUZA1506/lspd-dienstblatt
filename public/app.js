@@ -675,12 +675,12 @@ function renderPasswordChangeRequired() {
         <span>LSPD Dienstblatt</span>
       </div>
       <div class="panel force-password-panel">
-        <span class="login-kicker">Sicherheitspr?fung</span>
-        <h3>Passwort ?ndern</h3>
-        <p class="muted">Du bist mit dem Standardpasswort angemeldet. Aus Sicherheitsgr?nden musst du jetzt ein eigenes Passwort festlegen, bevor du das Dienstblatt sehen kannst.</p>
+        <span class="login-kicker">Sicherheitsprüfung</span>
+        <h3>Passwort ändern</h3>
+        <p class="muted">Du bist mit dem Standardpasswort angemeldet. Aus Sicherheitsgründen musst du jetzt ein eigenes Passwort festlegen, bevor du das Dienstblatt sehen kannst.</p>
         <div class="security-note-box">
-          <strong>Passw?rter sind gesch?tzt und nicht einsehbar.</strong>
-          <span>Auch die IT kann dein Passwort nicht auslesen. Es kann nur auf das Standardpasswort zur?ckgesetzt und danach von dir neu gesetzt werden.</span>
+          <strong>Passwörter sind geschützt und nicht einsehbar.</strong>
+          <span>Auch die IT kann dein Passwort nicht auslesen. Es kann nur auf das Standardpasswort zurückgesetzt und danach von dir neu gesetzt werden.</span>
         </div>
         <label>Neues Passwort<input type="password" id="forcedNewPassword" autocomplete="new-password" required></label>
         <label>Neues Passwort wiederholen<input type="password" id="forcedRepeatPassword" autocomplete="new-password" required></label>
@@ -7320,12 +7320,14 @@ function renderEvidenceLinks(item) {
   return `<div class="evidence-link-list">${links.map((link, index) => {
     const isUrl = /^https?:\/\//i.test(link);
     const isPrnt = /^https?:\/\/(?:www\.)?prnt\.sc\//i.test(link);
+    const isGyazo = /^https?:\/\/(?:www\.)?gyazo\.com\//i.test(link);
+    const previewSrc = isPrnt || isGyazo ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link);
     const isUploadedImage = /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(link);
     if (isUploadedImage) {
       return `<div class="evidence-preview-card uploaded-preview"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${escapeHtml(link)}" alt="Beweis ${index + 1}" loading="lazy"></button><span class="evidence-text-link">Hochgeladenes Bild</span></div>`;
     }
     return isUrl
-      ? `<div class="evidence-preview-card ${isPrnt ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${isPrnt ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link)}" alt="Beweis ${index + 1}" loading="lazy" onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">PRNT.SC</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
+      ? `<div class="evidence-preview-card ${isPrnt || isGyazo ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${previewSrc}" alt="Beweis ${index + 1}" loading="lazy" onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">${isGyazo ? "GYAZO" : "PRNT.SC"}</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
       : `<span>${escapeHtml(link)}</span>`;
   }).join("")}</div>`;
 }
@@ -7452,7 +7454,8 @@ function renderSeizures() {
 
 function openEvidencePreview(link) {
   const isPrnt = /^https?:\/\/(?:www\.)?prnt\.sc\//i.test(link || "");
-  const preview = isPrnt ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : link;
+  const isGyazo = /^https?:\/\/(?:www\.)?gyazo\.com\//i.test(link || "");
+  const preview = isPrnt || isGyazo ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : link;
   openModal(`
     <h3>Beweisvorschau</h3>
     <div class="evidence-popup-preview">
@@ -8953,6 +8956,7 @@ function openDepartmentMemberModal(department, member = null) {
     if (position === "Direktion") return false;
     return positionPowerFor(department, position) < positionPowerFor(department, myDepartmentPosition);
   });
+  const defaultDepartmentPosition = member?.position || (allowedPositions.includes("Anwärter") ? "Anwärter" : allowedPositions.includes("Mitglied") ? "Mitglied" : allowedPositions[0] || "Mitglied");
   openModal(`
     <h3>${member ? "Position bearbeiten" : "Person hinzufügen"}</h3>
     <p class="muted">Wählen Sie eine Person aus, die zu ${escapeHtml(department.name)} hinzugefügt werden soll.</p>
@@ -8960,7 +8964,7 @@ function openDepartmentMemberModal(department, member = null) {
     <label>Person auswählen<select id="departmentUserSelect">${availableUsers.map((user) => `<option value="${user.id}">${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn)} - ${escapeHtml(rankLabel(user.rank))}</option>`).join("")}</select></label>`}
     <label>Position auswählen
       <select id="departmentPositionSelect">
-        ${(allowedPositions.length ? allowedPositions : ["Mitglied"]).map((position) => `<option ${member?.position === position ? "selected" : ""}>${escapeHtml(position)}</option>`).join("")}
+        ${(allowedPositions.length ? allowedPositions : ["Mitglied"]).map((position) => `<option ${defaultDepartmentPosition === position ? "selected" : ""}>${escapeHtml(position)}</option>`).join("")}
       </select>
     </label>
     <p id="modalError" class="form-error"></p>

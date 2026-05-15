@@ -170,6 +170,7 @@ function ensureStorage() {
       uprankAdjustments: [],
       permissions: defaultPermissions(),
       devMode: false,
+      defaultPassword: DEFAULT_PASSWORD,
       restartTimes: [],
       restartLastRun: {}
     },
@@ -215,6 +216,7 @@ function readDb() {
   db.settings.uprankAdjustments = Array.isArray(db.settings.uprankAdjustments) ? db.settings.uprankAdjustments : [];
   db.settings.permissions = normalizePermissions(db.settings.permissions);
   db.settings.devMode = Boolean(db.settings.devMode);
+  db.settings.defaultPassword = String(db.settings.defaultPassword || DEFAULT_PASSWORD);
   db.settings.restartTimes = Array.isArray(db.settings.restartTimes) ? db.settings.restartTimes : [];
   db.settings.restartLastRun = db.settings.restartLastRun && typeof db.settings.restartLastRun === "object" ? db.settings.restartLastRun : {};
   db.settings.informationRightsText = String(db.settings.informationRightsText || "");
@@ -315,6 +317,11 @@ function publicUser(user) {
     avatarUrl: user.avatarUrl || "",
     fullName: `${user.firstName} ${user.lastName}`.trim()
   };
+}
+
+function publicSettings(settings) {
+  const { defaultPassword, ...safeSettings } = settings || {};
+  return safeSettings;
 }
 
 function logFluctuation(db, user, type, actor) {
@@ -750,7 +757,7 @@ app.get("/api/bootstrap", requireAuth, (req, res) => {
     ranks: req.db.settings.ranks,
     roles,
     departmentPositions,
-    settings: req.db.settings,
+    settings: publicSettings(req.db.settings),
     customPages: req.db.settings.customPages || [],
     departments: req.db.settings.departments.map((department) => publicDepartment(department, req.db, req.user)),
     notes: [...req.db.notes].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
@@ -826,7 +833,7 @@ app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {
     ...normalized.value,
     trainings: { ...Object.fromEntries(trainingNames.map((training) => [training, false])), ...normalized.value.trainings },
     lastPromotionAt: todayIso(),
-    passwordHash: hashPassword(DEFAULT_PASSWORD),
+    passwordHash: hashPassword(req.db.settings.defaultPassword || DEFAULT_PASSWORD),
     avatarUrl: "",
     locked: false,
     accountStatus: "Aktiv",
@@ -842,7 +849,7 @@ app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {
   logFluctuation(req.db, user, "Eingestellt", req.user);
   logAction(req.db, req.user, "Mitglied eingestellt", `${user.firstName} ${user.lastName}`.trim(), { after: publicUser(user) });
   writeDb(req.db);
-  res.status(201).json({ user: publicUser(user), defaultPassword: DEFAULT_PASSWORD });
+  res.status(201).json({ user: publicUser(user) });
 });
 
 app.patch("/api/users/:id", requireAuth, requireRole("Direktion"), (req, res) => {
@@ -1200,7 +1207,7 @@ app.patch("/api/settings/defcon", requireAuth, requirePermission("actions", "edi
   req.db.settings.defconUpdatedAt = nowIso();
   logAction(req.db, req.user, "DEFCON geändert", "DEFCON", { before, after: { defcon, defconText: req.db.settings.defconText } });
   writeDb(req.db);
-  res.json({ settings: req.db.settings });
+  res.json({ settings: publicSettings(req.db.settings) });
 });
 
 app.patch("/api/information", requireAuth, requirePermission("actions", "manageInformation", "Direktion"), (req, res) => {
@@ -1233,7 +1240,7 @@ app.patch("/api/information", requireAuth, requirePermission("actions", "manageI
     informationFactions: req.db.settings.informationFactions
   } });
   writeDb(req.db);
-  res.json({ settings: req.db.settings });
+  res.json({ settings: publicSettings(req.db.settings) });
 });
 
 app.patch("/api/it/ranks", requireAuth, requireRole("IT"), (req, res) => {
@@ -1291,7 +1298,7 @@ app.patch("/api/it/page-order", requireAuth, requireRole("IT"), (req, res) => {
   req.db.settings.pageOrder = [...new Set(pageOrder)];
   logAction(req.db, req.user, "Reiter sortiert", "IT", { before, after: req.db.settings.pageOrder });
   writeDb(req.db);
-  res.json({ settings: req.db.settings });
+  res.json({ settings: publicSettings(req.db.settings) });
 });
 
 app.post("/api/it/custom-pages", requireAuth, requireRole("IT"), (req, res) => {
@@ -1314,7 +1321,7 @@ app.post("/api/it/custom-pages", requireAuth, requireRole("IT"), (req, res) => {
   req.db.settings.pageOrder = [...new Set([...(req.db.settings.pageOrder || []), key])];
   logAction(req.db, req.user, "Reiter erstellt", name, { after: page });
   writeDb(req.db);
-  res.status(201).json({ page, settings: req.db.settings });
+  res.status(201).json({ page, settings: publicSettings(req.db.settings) });
 });
 
 app.post("/api/it/departments", requireAuth, requireRole("IT"), (req, res) => {
@@ -1334,7 +1341,7 @@ app.post("/api/it/departments", requireAuth, requireRole("IT"), (req, res) => {
   writeDb(req.db);
   res.status(201).json({
     department: publicDepartment(department, req.db, req.user),
-    settings: req.db.settings,
+    settings: publicSettings(req.db.settings),
     departments: req.db.settings.departments.map((item) => publicDepartment(item, req.db, req.user))
   });
 });
@@ -1347,12 +1354,34 @@ app.patch("/api/it/permissions", requireAuth, requireRole("IT"), (req, res) => {
   res.json({ permissions: req.db.settings.permissions });
 });
 
+app.patch("/api/it/default-password", requireAuth, requireRole("IT"), (req, res) => {
+  const defaultPassword = String(req.body.defaultPassword || "").trim();
+  if (defaultPassword.length < 6) return res.status(400).json({ error: "Das Standardpasswort muss mindestens 6 Zeichen haben." });
+  const beforeSet = Boolean(req.db.settings.defaultPassword);
+  req.db.settings.defaultPassword = defaultPassword;
+  logAction(req.db, req.user, "Standardpasswort geändert", "IT", { beforeSet, afterSet: true });
+  writeDb(req.db);
+  res.json({ settings: publicSettings(req.db.settings) });
+});
+
+app.post("/api/it/users/:id/reset-password", requireAuth, requireRole("IT"), (req, res) => {
+  const user = req.db.users.find((item) => item.id === req.params.id && !item.terminated);
+  if (!user) return res.status(404).json({ error: "Benutzer nicht gefunden." });
+  const defaultPassword = String(req.db.settings.defaultPassword || DEFAULT_PASSWORD);
+  if (defaultPassword.length < 6) return res.status(400).json({ error: "Es ist kein gültiges Standardpasswort hinterlegt." });
+  user.passwordHash = hashPassword(defaultPassword);
+  user.updatedAt = nowIso();
+  logAction(req.db, req.user, "Passwort zurückgesetzt", actorName(user), { userId: user.id });
+  writeDb(req.db);
+  res.json({ user: publicUser(user) });
+});
+
 app.patch("/api/it/devmode", requireAuth, requireRole("IT"), (req, res) => {
   const before = Boolean(req.db.settings.devMode);
   req.db.settings.devMode = Boolean(req.body.devMode);
   logAction(req.db, req.user, req.db.settings.devMode ? "Devmode aktiviert" : "Devmode deaktiviert", "IT", { before, after: req.db.settings.devMode });
   writeDb(req.db);
-  res.json({ settings: req.db.settings });
+  res.json({ settings: publicSettings(req.db.settings) });
 });
 
 app.patch("/api/it/restarts", requireAuth, requireRole("IT"), (req, res) => {
@@ -1364,7 +1393,7 @@ app.patch("/api/it/restarts", requireAuth, requireRole("IT"), (req, res) => {
     .sort();
   logAction(req.db, req.user, "Restartzeiten geändert", "IT", { before, after: req.db.settings.restartTimes });
   writeDb(req.db);
-  res.json({ settings: req.db.settings });
+  res.json({ settings: publicSettings(req.db.settings) });
 });
 
 app.get("/api/it/export", requireAuth, requireRole("IT"), (req, res) => {
@@ -1768,7 +1797,7 @@ app.post("/api/seizures", requireAuth, (req, res) => {
   req.db.settings.seizures.unshift(entry);
   logAction(req.db, req.user, "Beschlagnahmung erstellt", suspect, { after: entry });
   writeDb(req.db);
-  res.status(201).json({ seizure: entry, settings: req.db.settings });
+  res.status(201).json({ seizure: entry, settings: publicSettings(req.db.settings) });
 });
 
 app.patch("/api/seizures/:id", requireAuth, (req, res) => {
@@ -1802,7 +1831,7 @@ app.patch("/api/seizures/:id", requireAuth, (req, res) => {
   });
   logAction(req.db, req.user, "Beschlagnahmung bearbeitet", suspect, { before, after: entry });
   writeDb(req.db);
-  res.json({ seizure: entry, settings: req.db.settings });
+  res.json({ seizure: entry, settings: publicSettings(req.db.settings) });
 });
 
 app.delete("/api/seizures/:id", requireAuth, requireRole("Direktion"), (req, res) => {
@@ -1811,7 +1840,7 @@ app.delete("/api/seizures/:id", requireAuth, requireRole("Direktion"), (req, res
   req.db.settings.seizures = req.db.settings.seizures.filter((item) => item.id !== req.params.id);
   logAction(req.db, req.user, "Beschlagnahmung gelöscht", entry.suspect || req.params.id, { before: entry });
   writeDb(req.db);
-  res.json({ ok: true, settings: req.db.settings });
+  res.json({ ok: true, settings: publicSettings(req.db.settings) });
 });
 
 app.post("/api/calendar/events", requireAuth, (req, res) => {

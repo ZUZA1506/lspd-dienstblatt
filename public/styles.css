@@ -4252,10 +4252,37 @@ table td.text-left {
   gap: 8px;
 }
 
+.it-password-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, 320px) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #314862;
+  border-radius: 8px;
+  background: #101827;
+}
+
+.it-password-panel strong,
+.it-password-panel small {
+  display: block;
+}
+
+.it-password-panel small {
+  margin-top: 4px;
+  color: #8fa0b8;
+}
+
+.it-password-panel p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .it-member-row,
 .department-position-row {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto;
+  grid-template-columns: minmax(240px, 1fr) auto auto auto;
   align-items: center;
   gap: 12px;
   min-height: 50px;
@@ -7409,6 +7436,7 @@ table td.text-left {
   .it-layout,
   .permission-controls,
   .permission-action-grid,
+  .it-password-panel,
   .leadership-facts,
   .leadership-hours,
   .leadership-toolbar,

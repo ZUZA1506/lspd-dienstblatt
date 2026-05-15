@@ -545,6 +545,8 @@ function successMessage(path, method) {
   if (path.includes("/it/ranks")) return "Ränge gespeichert.";
   if (path.includes("/it/nav-labels")) return "Reiter gespeichert.";
   if (path.includes("/it/permissions")) return "Rechte gespeichert.";
+  if (path.includes("/it/default-password")) return "Standardpasswort gespeichert.";
+  if (path.includes("/reset-password")) return "Passwort zurückgesetzt.";
   if (path.includes("/information")) return "Informationen gespeichert.";
   return "Aktion erfolgreich.";
 }
@@ -2261,11 +2263,21 @@ function renderIT() {
           <div><h3>Mitglieder</h3><p class="muted">Accounts, Ränge und IT-Zugänge direkt im IT-Blatt bearbeiten.</p></div>
           <button class="blue-btn" id="itCreateMember" type="button">Neues Mitglied einstellen</button>
         </div>
+        <form id="defaultPasswordForm" class="it-password-panel">
+          <div>
+            <strong>Standardpasswort</strong>
+            <small>Neue Accounts bekommen dieses Passwort automatisch. Einzelne Accounts kannst du unten darauf zurücksetzen.</small>
+          </div>
+          <input id="defaultPasswordInput" type="password" minlength="6" autocomplete="new-password" placeholder="Neues Standardpasswort">
+          <button class="blue-btn" type="submit">Standardpasswort speichern</button>
+          <p id="defaultPasswordMessage" class="muted"></p>
+        </form>
         <div class="it-member-list">
           ${state.users.map((user) => `
             <div class="it-member-row">
               <span>${avatarMarkup(user, "sm")}<span><strong>${escapeHtml(fullName(user))}</strong><small>DN ${escapeHtml(user.dn || "-")} · ${escapeHtml(rankLabel(user.rank))}</small></span></span>
               <span class="it-member-roles">${roleBadges(user)}</span>
+              <button class="ghost-btn reset-member-password" type="button" data-user-id="${escapeHtml(user.id)}">Passwort Reset</button>
               <button class="mini-icon it-edit-member" type="button" data-user-id="${escapeHtml(user.id)}" title="Mitglied bearbeiten">${actionIcon("edit")}</button>
             </div>
           `).join("")}
@@ -2348,7 +2360,9 @@ function renderIT() {
   $("#addRank")?.addEventListener("click", openAddRankModal);
   $("#removeRank")?.addEventListener("click", openRemoveRankModal);
   $("#itCreateMember")?.addEventListener("click", () => openUserModal());
+  $("#defaultPasswordForm")?.addEventListener("submit", saveDefaultPassword);
   document.querySelectorAll(".it-edit-member").forEach((button) => button.addEventListener("click", () => openUserModal(state.users.find((user) => user.id === button.dataset.userId))));
+  document.querySelectorAll(".reset-member-password").forEach((button) => button.addEventListener("click", () => openResetPasswordModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".page-permission-open").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
   setupPermissionSearch(document);
   document.querySelectorAll(".it-section summary button").forEach((button) => {
@@ -2418,6 +2432,57 @@ async function saveRestartTimes(times) {
   });
   state.settings = data.settings;
   renderIT();
+}
+
+async function saveDefaultPassword(event) {
+  event.preventDefault();
+  const input = $("#defaultPasswordInput");
+  const message = $("#defaultPasswordMessage");
+  const defaultPassword = input?.value.trim() || "";
+  if (defaultPassword.length < 6) {
+    if (message) {
+      message.textContent = "Mindestens 6 Zeichen eintragen.";
+      message.className = "form-error";
+    }
+    return;
+  }
+  try {
+    const data = await api("/api/it/default-password", { method: "PATCH", body: JSON.stringify({ defaultPassword }) });
+    state.settings = data.settings || state.settings;
+    if (input) input.value = "";
+    if (message) {
+      message.textContent = "Standardpasswort gespeichert. Neue Accounts und Resets nutzen es ab jetzt.";
+      message.className = "muted";
+    }
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-error";
+    }
+  }
+}
+
+function openResetPasswordModal(user) {
+  if (!user) return;
+  openModal(`
+    <h3>Passwort zurücksetzen</h3>
+    <p class="muted">${escapeHtml(fullName(user))} kann sich danach wieder mit dem aktuellen Standardpasswort anmelden.</p>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions">
+      <button class="ghost-btn" type="button" data-close>Abbrechen</button>
+      <button class="orange-btn" id="confirmPasswordReset" type="button">Auf Standardpasswort setzen</button>
+    </div>
+  `, (modal) => {
+    modal.querySelector("#confirmPasswordReset").addEventListener("click", async () => {
+      try {
+        await api(`/api/it/users/${user.id}/reset-password`, { method: "POST", body: "{}" });
+        closeModal();
+        await bootstrap();
+      } catch (error) {
+        $("#modalError").textContent = error.message;
+      }
+    });
+  });
 }
 
 async function movePageOrder(page, direction) {

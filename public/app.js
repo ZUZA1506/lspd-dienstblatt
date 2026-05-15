@@ -559,15 +559,55 @@ function showNotify(message, type = "success") {
   item.style.setProperty("--notify-duration", `${duration}ms`);
   item.innerHTML = `
     <div class="notify-icon">${type === "success" ? "✓" : type === "danger" ? "×" : "!"}</div>
+    <button class="notify-close" type="button" aria-label="Benachrichtigung schliessen">&times;</button>
     <div class="notify-copy">
       <strong>${type === "success" ? "Erfolg" : type === "danger" ? "Gelöscht" : "Fehler"}</strong>
       <span>${escapeHtml(message)}</span>
     </div>
     <div class="notify-progress"></div>
   `;
+  let remaining = duration;
+  let startedAt = 0;
+  let closeTimer = null;
+  let removeTimer = null;
+  let closed = false;
+  const clearTimers = () => {
+    window.clearTimeout(closeTimer);
+    window.clearTimeout(removeTimer);
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearTimers();
+    item.classList.remove("paused");
+    item.classList.add("leaving");
+    removeTimer = window.setTimeout(() => item.remove(), 280);
+  };
+  const armTimer = () => {
+    startedAt = performance.now();
+    closeTimer = window.setTimeout(close, Math.max(120, remaining));
+  };
+  item.addEventListener("mouseenter", () => {
+    if (closed) return;
+    window.clearTimeout(closeTimer);
+    remaining = Math.max(120, remaining - (performance.now() - startedAt));
+    item.classList.add("paused");
+  });
+  item.addEventListener("mouseleave", () => {
+    if (closed) return;
+    item.classList.remove("paused");
+    armTimer();
+  });
+  item.addEventListener("click", (event) => {
+    if (event.target.closest(".notify-close")) return;
+    close();
+  });
+  item.querySelector(".notify-close")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    close();
+  });
   notifyRoot.appendChild(item);
-  window.setTimeout(() => item.classList.add("leaving"), duration);
-  window.setTimeout(() => item.remove(), duration + 280);
+  armTimer();
 }
 
 async function bootstrap() {
@@ -858,7 +898,7 @@ function renderMembers() {
                 <td class="member-name-col text-left"><span class="member-name member-name-wrap">${avatarMarkup(user, "sm")}<span>${wrapNameForTable(fullName(user))}</span></span></td>
                 <td class="text-center">${escapeHtml(user.phone)}</td>
                 <td class="text-left">${escapeHtml(user.dn)}</td>
-                <td class="member-rank-col text-center"><span class="rank-number" title="${escapeHtml(rankLabel(user.rank))}">${escapeHtml(user.rank)}</span></td>
+                <td class="member-rank-col text-center"><span class="rank-number" data-rank-label="${escapeHtml(rankLabel(user.rank))}">${escapeHtml(user.rank)}</span></td>
                 <td class="text-left">${formatDate(user.joinedAt)}</td>
                 <td class="text-left">${formatDate(user.lastPromotionAt)}</td>
                 ${trainingGroups.map((group) => group.map((training) => {
@@ -1942,12 +1982,32 @@ function departmentTab(department) {
   const selected = state.departmentTabs?.[department.id] || "overview";
   if (selected === "members") return "overview";
   if (selected === "leadership" && !departmentActionAllowed(department, "departmentLeadership")) return "overview";
+  if (["estExam", "moduleExam"].includes(selected) && !isTrainingDepartmentSheet(department)) return "overview";
   return selected;
 }
 
 function setDepartmentTab(department, tab) {
   state.departmentTabs = { ...(state.departmentTabs || {}), [department.id]: tab };
   localStorage.setItem("lspd_department_tabs", JSON.stringify(state.departmentTabs));
+}
+
+function isTrainingDepartmentSheet(department) {
+  const name = cleanText(department?.name || "");
+  return /(training|ausbildung)/i.test(name) && !/(human|humane|ressource|resource)/i.test(name);
+}
+
+function departmentsForOverview() {
+  const departments = [...state.departments];
+  const pageOrder = state.settings?.pageOrder || [];
+  const originalIndex = new Map(departments.map((department, index) => [department.id, index]));
+  return departments.sort((a, b) => {
+    if (a.id === "direktion") return -1;
+    if (b.id === "direktion") return 1;
+    const aOrder = pageOrder.indexOf(`dept:${a.id}`);
+    const bOrder = pageOrder.indexOf(`dept:${b.id}`);
+    if (aOrder !== -1 || bOrder !== -1) return (aOrder === -1 ? 10000 : aOrder) - (bOrder === -1 ? 10000 : bOrder);
+    return (originalIndex.get(a.id) || 0) - (originalIndex.get(b.id) || 0);
+  });
 }
 
 function renderPermissionPickList(type, items, selected = []) {
@@ -2041,7 +2101,24 @@ function renderITOverviewPanel(editablePages) {
         <button class="it-tool" id="overviewImportData"><strong>Datenimport</strong><span>Backup wiederherstellen</span></button>
         <button class="it-tool" id="overviewCreatePage"><strong>Reiter erstellen</strong><span>Leeres Template-Blatt</span></button>
         <button class="it-tool" id="overviewCreateDepartment"><strong>Abteilung erstellen</strong><span>Leeres Abteilungsblatt</span></button>
+        <button class="it-tool" id="overviewClearSessions"><strong>Sessions</strong><span>Andere Logins abmelden</span></button>
         <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="overviewToggleDevMode"><strong>Devmode</strong><span>${state.settings?.devMode ? "Aktiv" : "Aus"}</span></button>
+        <div class="it-tool passive"><strong>Speicher</strong><span>storage/dienstblatt.json</span></div>
+      </div>
+      <div class="restart-overview-card">
+        <div>
+          <strong>Restarts</strong>
+          <small>T&auml;gliche Uhrzeiten, zu denen aktive Dienste automatisch beendet werden.</small>
+        </div>
+        <div class="restart-editor">
+          <input id="restartTimeInput" type="time" value="00:00">
+          <button class="blue-btn" id="addRestartTime" type="button">Restartzeit hinzuf&uuml;gen</button>
+        </div>
+        <div class="restart-list">
+          ${(state.settings.restartTimes || []).map((time) => `
+            <span class="restart-chip"><b>${escapeHtml(time)}</b><button class="mini-icon delete-restart-time" type="button" data-time="${escapeHtml(time)}" title="L&ouml;schen">${actionIcon("delete")}</button></span>
+          `).join("") || `<p class="muted">Noch keine Restartzeiten angelegt.</p>`}
+        </div>
       </div>
       <div class="grid-4 compact-stats">
         <div class="stat-card"><span>Reiter</span><strong>${editablePages.length}</strong><small>Verwaltbar</small></div>
@@ -2082,8 +2159,10 @@ function renderIT() {
 
   const editablePages = editableItPages();
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
-  const itTab = localStorage.getItem("lspd_it_tab") || "overview";
+  const storedItTab = localStorage.getItem("lspd_it_tab") || "overview";
   const itTabs = [["overview", "Übersicht"], ["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"], ["system", "System"]];
+  const visibleItTabs = itTabs.filter(([id]) => id !== "system");
+  const itTab = visibleItTabs.some(([id]) => id === storedItTab) ? storedItTab : "overview";
   content.innerHTML = `
     <section class="it-command-center">
       <div class="panel it-hero-panel it-overview-card">
@@ -2096,9 +2175,9 @@ function renderIT() {
           <span><b>${state.ranks.length}</b> Ränge</span>
           <span><b>${state.users.length}</b> Accounts</span>
         </div>
-      </div>
-      <div class="tabs-row it-tabs">
-        ${itTabs.map(([id, label]) => `<button class="${itTab === id ? "tab-active" : ""}" data-it-tab="${id}">${label}</button>`).join("")}
+        <div class="tabs-row it-tabs">
+          ${visibleItTabs.map(([id, label]) => `<button class="${itTab === id ? "tab-active" : ""}" data-it-tab="${id}">${label}</button>`).join("")}
+        </div>
       </div>
     </section>
 
@@ -2289,6 +2368,10 @@ function renderIT() {
 
   $("#clearSessionsBtn")?.addEventListener("click", async () => {
     await api("/api/it/clear-sessions", { method: "POST", body: "{}" });
+  });
+  $("#overviewClearSessions")?.addEventListener("click", async () => {
+    await api("/api/it/clear-sessions", { method: "POST", body: "{}" });
+    showNotify("Andere Sessions wurden abgemeldet.");
   });
 
   $("#toggleDevModeBtn")?.addEventListener("click", async () => {
@@ -2610,9 +2693,7 @@ function openRemoveRankModal() {
 }
 
 function renderDepartmentsOverview() {
-  const departments = orderPages(state.departments.map((department) => `dept:${department.id}`))
-    .map((page) => departmentByPage(page))
-    .filter(Boolean);
+  const departments = departmentsForOverview();
   content.innerHTML = `
     <section class="department-grid">
       ${departments.map((department) => renderDepartmentCard(department)).join("")}
@@ -2680,7 +2761,7 @@ function renderDepartmentPage(department) {
   const canNotes = departmentActionAllowed(department, "departmentNotes");
   const canInfo = departmentActionAllowed(department, "departmentInfo");
   const canLeadership = departmentActionAllowed(department, "departmentLeadership");
-  const isTrainingDepartment = department.id === "training-recruitment";
+  const isTrainingDepartment = isTrainingDepartmentSheet(department);
   const tab = departmentTab(department);
   content.innerHTML = `
     <section class="internal-subhead department-overview-head">
@@ -6718,7 +6799,7 @@ function renderDepartmentLeadershipPanel(department) {
         ${members.length ? members.map((member) => renderLeadershipMemberCard(department, member, selectedRange)).join("") : `<p class="muted">Keine Mitglieder gefunden.</p>`}
       </div>
     </div>
-    ${department.id === "training-recruitment" ? renderTrainingManagementPanels() : ""}
+    ${isTrainingDepartmentSheet(department) ? renderTrainingManagementPanels() : ""}
   `;
 }
 
@@ -7627,7 +7708,7 @@ function closeModal() {
       store.activeExams = (store.activeExams || []).filter((exam) => exam.id !== discardTrainingExamId || exam.startedAt);
       saveTrainingStore(store);
       const department = departmentByPage?.(state.page);
-      if (department?.id === "training-recruitment") window.setTimeout(() => renderDepartmentPage(department), 0);
+      if (isTrainingDepartmentSheet(department)) window.setTimeout(() => renderDepartmentPage(department), 0);
     } catch {
       // Closing a modal should never block the UI.
     }

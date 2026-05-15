@@ -1165,11 +1165,12 @@ function renderDirektion() {
     return;
   }
   const directionDepartment = state.departments.find((department) => department.id === "direktion");
-  const activeDutyCount = state.duty.length;
-  const suspendedCount = state.users.filter((user) => user.accountStatus === "Suspendiert" || user.locked).length;
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const recentFluctuation = (state.settings.fluctuation || []).filter((entry) => new Date(entry.createdAt).getTime() >= sevenDaysAgo).length;
+  const directionMembersCount = directionDepartment?.members.length || 0;
   const activeStrikeCount = (state.disciplinary || []).filter((entry) => (entry.type === "Strike" || entry.sanctionType === "Strike") && !entry.archivedAt && (!entry.expiresAt || new Date(entry.expiresAt) > new Date())).length;
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const monthFines = (state.disciplinary || []).filter((entry) => entry.sanctionType === "Geldstrafe" && new Date(entry.createdAt) >= monthStart);
+  const openFines = monthFines.filter((entry) => !entry.paidAt);
+  const monthFineAmount = monthFines.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
   const tabs = [
     ["overview", "Übersicht"],
     ["members", "Mitglieder Verwaltung"],
@@ -1190,18 +1191,29 @@ function renderDirektion() {
         <button class="blue-btn vote-btn">${iconSvg("Abteilungen")} Abstimmung</button>
       </div>
       ${state.directionTab === "overview" ? `
-      <div class="grid-4 internal-stats direction-overview-stats">
-        <div class="stat-card internal-stat-card"><span>Aktive Accounts</span><i>${iconSvg("Mitglieder")}</i><strong>${state.users.length}</strong><small>Aktuell im Dienstblatt</small></div>
-        <div class="stat-card internal-stat-card"><span>Im Dienst</span><i>${iconSvg("Dienstblatt")}</i><strong>${activeDutyCount}</strong><small>Live eingetragene Officer</small></div>
-        <div class="stat-card internal-stat-card"><span>Statusmeldungen</span><i>${iconSvg("Informationen")}</i><strong>${suspendedCount}</strong><small>Gesperrt oder suspendiert</small></div>
-        <div class="stat-card internal-stat-card"><span>Fluktuation 7T</span><i>${iconSvg("Mitgliederfluktation")}</i><strong>${recentFluctuation}</strong><small>Personalbewegungen</small></div>
+      <div class="direction-overview-focus">
+        <article class="direction-focus-card">
+          <span>Mitglieder</span>
+          <strong>${state.users.length}</strong>
+          <small>Aktive Mitglieder im Dienstblatt</small>
+        </article>
+        <article class="direction-focus-card muted-card">
+          <span>Abmeldungen</span>
+          <strong>0</strong>
+          <small>Counter vorbereitet</small>
+        </article>
+        <article class="direction-focus-card strike-card">
+          <span>Aktive Strikes</span>
+          <strong>${activeStrikeCount}</strong>
+          <small>Nicht archiviert oder abgelaufen</small>
+        </article>
+        <article class="direction-focus-card fine-card">
+          <span>Geldstrafen Monat</span>
+          <strong>${monthFines.length}</strong>
+          <small>${openFines.length} offen / ${monthFineAmount.toLocaleString("de-DE")} $ gesamt</small>
+        </article>
       </div>
-      <div class="grid-3 direction-pulse-row">
-        <div class="info-box"><strong>Aktive Strikes</strong><p>${activeStrikeCount}</p></div>
-        <div class="info-box"><strong>Direktionsmitglieder</strong><p>${directionDepartment?.members.length || 0}</p></div>
-        <div class="info-box"><strong>Letzte Bewegung</strong><p>${escapeHtml(state.settings.fluctuation?.[0]?.name || "Keine Eintr?ge")}</p></div>
-      </div>
-      ${renderDirectionDepartmentContent(directionDepartment)}
+      ${renderDirectionDepartmentContent(directionDepartment, directionMembersCount)}
       ` : ""}
       ${state.directionTab === "members" ? renderDirectionMembersPanel() : ""}
       ${state.directionTab === "fluctuation" ? renderDirectionFluctuationPanel() : ""}
@@ -1221,7 +1233,6 @@ function renderDirektion() {
   });
   $("#createUserBtn")?.addEventListener("click", () => openUserModal());
   $("#addManualDutyBtn")?.addEventListener("click", openManualDutyModal);
-  $("#removeManualDutyBtn")?.addEventListener("click", openRemoveDutyHoursModal);
   $("#hoursUserSelect")?.addEventListener("change", (event) => {
     localStorage.setItem("lspd_hours_user", event.target.value);
     renderDirektion();
@@ -1243,10 +1254,9 @@ function renderDirektion() {
   setupTableFilter("#logSearch");
   setupTableFilter("#hoursSearch");
   setupTableFilter("#directionFluctuationSearch");
-  document.querySelectorAll(".remove-duty-history").forEach((button) => button.addEventListener("click", () => removeDutyHistory(button.dataset.id)));
 }
 
-function renderDirectionDepartmentContent(department) {
+function renderDirectionDepartmentContent(department, memberCount = department?.members?.length || 0) {
   if (!department) return "";
   const canMembers = departmentActionAllowed(department, "departmentMembers");
   const canNotes = departmentActionAllowed(department, "departmentNotes");
@@ -1254,7 +1264,7 @@ function renderDirectionDepartmentContent(department) {
     <div class="department-layout department-overview-content">
       <div class="panel">
         <div class="panel-header">
-          <h3><span class="section-icon">${iconSvg("Mitglieder")}</span>Abteilungsmitglieder</h3>
+          <h3><span class="section-icon">${iconSvg("Mitglieder")}</span>Abteilungsmitglieder <span class="heading-count">${memberCount}</span></h3>
           ${canMembers ? `<button class="blue-btn department-add" data-department-id="${escapeHtml(department.id)}">${iconSvg("Mitglieder")} Person hinzufügen</button>` : ""}
         </div>
         ${renderDepartmentMemberTable(department)}
@@ -1595,7 +1605,6 @@ function renderDirectionHoursPanel() {
             ${state.users.map((user) => `<option value="${user.id}" ${selectedUserId === user.id ? "selected" : ""}>${escapeHtml(fullName(user))}</option>`).join("")}
           </select>
           <button class="blue-btn" id="addManualDutyBtn">Stunden hinzufügen</button>
-          <button class="red-btn" id="removeManualDutyBtn">Stunden entfernen</button>
         </div>
       </div>
       <div class="grid-4 compact-stats">
@@ -1609,19 +1618,18 @@ function renderDirectionHoursPanel() {
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Dienstbeginn</th><th>Dienstende</th><th>Diensttyp</th><th>Dauer</th><th>Status</th><th>Aktionen</th></tr></thead>
+          <thead><tr><th>Name</th><th>Dienstbeginn</th><th>Dienstende</th><th>Diensttyp</th><th>Dauer</th><th>Status</th></tr></thead>
           <tbody>
             ${scopedRows.map((entry) => `
               <tr class="filterable-row">
-                <td>${escapeHtml(fullName(entry.user))}</td>
+                <td>${escapeHtml(fullName(entry.user || findAnyUser(entry.userId)) || "-")}</td>
                 <td>${formatDateTime(entry.startedAt)}</td>
                 <td>${entry.endedAt ? formatDateTime(entry.endedAt) : "Läuft noch"}</td>
                 <td>${escapeHtml(entry.status)}</td>
                 <td>${formatDuration(durationMs(entry))}</td>
                 <td>${entry.endedAt ? "Beendet" : "Aktiv"}</td>
-                <td><button class="mini-icon danger remove-duty-history" data-id="${escapeHtml(entry.id)}" title="Entfernen">${actionIcon("delete")}</button></td>
               </tr>
-            `).join("") || `<tr><td colspan="7" class="muted">Noch keine Dienstzeiten.</td></tr>`}
+            `).join("") || `<tr><td colspan="6" class="muted">Noch keine Dienstzeiten.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -7168,6 +7176,10 @@ function renderEvidenceLinks(item) {
   return `<div class="evidence-link-list">${links.map((link, index) => {
     const isUrl = /^https?:\/\//i.test(link);
     const isPrnt = /^https?:\/\/(?:www\.)?prnt\.sc\//i.test(link);
+    const isUploadedImage = /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(link);
+    if (isUploadedImage) {
+      return `<div class="evidence-preview-card uploaded-preview"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${escapeHtml(link)}" alt="Beweis ${index + 1}" loading="lazy"></button><span class="evidence-text-link">Hochgeladenes Bild</span></div>`;
+    }
     return isUrl
       ? `<div class="evidence-preview-card ${isPrnt ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${isPrnt ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link)}" alt="Beweis ${index + 1}" loading="lazy" onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">PRNT.SC</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
       : `<span>${escapeHtml(link)}</span>`;
@@ -7377,7 +7389,11 @@ function openSeizureModal(item = null) {
             ? `<input class="evidence-link-input" value="${escapeHtml(link)}" placeholder="Screenshot-Link / Beweis-Link">`
             : `<div class="evidence-input-row"><input class="evidence-link-input" value="${escapeHtml(link)}" placeholder="Weiterer Screenshot-Link / Beweis-Link"><button class="mini-icon remove-evidence-link" type="button" title="Entfernen">X</button></div>`).join("")}
         </div>
-        <button class="ghost-btn evidence-add-btn" type="button" id="addEvidenceLink">${iconSvg("Plus")} Weiteren Beweis hinzufügen</button>
+        <div class="evidence-actions-row">
+          <button class="ghost-btn evidence-add-btn" type="button" id="addEvidenceLink">${iconSvg("Plus")} Weiteren Link hinzufügen</button>
+          <button class="ghost-btn evidence-add-btn" type="button" id="uploadEvidenceImage">${iconSvg("Plus")} Bild hochladen</button>
+          <input id="evidenceImageUpload" class="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+        </div>
       </div>
       <label>Schwarzgeld Menge<input id="seizureBlackMoney" type="number" min="0" step="1" value="${escapeHtml(item?.blackMoney || "")}" placeholder="0"></label>
       <label>Kisten Menge<input id="seizureCrates" type="number" min="0" step="1" value="${escapeHtml(item?.crates || "")}" placeholder="0"></label>
@@ -7442,6 +7458,27 @@ function openSeizureModal(item = null) {
       modal.querySelector("#evidenceLinkList").appendChild(row);
       row.querySelector(".remove-evidence-link").addEventListener("click", () => row.remove());
       row.querySelector("input").focus();
+    });
+    modal.querySelector("#uploadEvidenceImage")?.addEventListener("click", () => modal.querySelector("#evidenceImageUpload")?.click());
+    modal.querySelector("#evidenceImageUpload")?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
+        $("#modalError").textContent = "Bitte nur Foto-Dateien hochladen (PNG, JPG, WEBP oder GIF).";
+        return;
+      }
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const row = document.createElement("div");
+      row.className = "evidence-input-row uploaded-evidence-row";
+      row.innerHTML = `<input class="evidence-link-input" value="${escapeHtml(dataUrl)}" readonly data-uploaded-image="true"><span class="uploaded-evidence-name">${escapeHtml(file.name)}</span><button class="mini-icon remove-evidence-link" type="button" title="Entfernen">X</button>`;
+      modal.querySelector("#evidenceLinkList").appendChild(row);
+      row.querySelector(".remove-evidence-link").addEventListener("click", () => row.remove());
     });
   });
 }
@@ -8544,38 +8581,6 @@ function openManualDutyModal() {
       }
     });
   });
-}
-
-function openRemoveDutyHoursModal() {
-  const selectedUserId = localStorage.getItem("lspd_hours_user") || "all";
-  const rows = (state.dutyHistory || []).filter((entry) => selectedUserId === "all" || entry.userId === selectedUserId);
-  openModal(`
-    <h3>Stunden entfernen</h3>
-    <label>Dienstzeit auswählen
-      <select id="removeDutyEntry">
-        ${rows.map((entry) => `<option value="${entry.id}">${escapeHtml(fullName(entry.user))} - ${formatDateTime(entry.startedAt)} - ${escapeHtml(entry.status)} - ${formatDuration(durationMs(entry))}</option>`).join("")}
-      </select>
-    </label>
-    <p id="modalError" class="form-error">${rows.length ? "" : "Keine Dienstzeiten zum Entfernen vorhanden."}</p>
-    <div class="modal-actions">
-      <button class="ghost-btn" data-close>Abbrechen</button>
-      <button class="red-btn" id="confirmRemoveDutyHours" ${rows.length ? "" : "disabled"}>Entfernen</button>
-    </div>
-  `, (modal) => {
-    modal.querySelector("#confirmRemoveDutyHours")?.addEventListener("click", async () => {
-      try {
-        await removeDutyHistory($("#removeDutyEntry").value);
-        closeModal();
-      } catch (error) {
-        $("#modalError").textContent = error.message;
-      }
-    });
-  });
-}
-
-async function removeDutyHistory(id) {
-  await api(`/api/duty/history/${id}`, { method: "DELETE" });
-  await bootstrap();
 }
 
 function openDeleteNoteModal(noteId) {

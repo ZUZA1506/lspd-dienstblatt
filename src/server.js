@@ -653,7 +653,7 @@ function evaluateUprank(db, user, targetRank) {
   };
 }
 
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use((req, res, next) => {
   const ext = path.extname(req.path).toLowerCase();
   if (req.path.startsWith("/api/") || !ext) {
@@ -1719,11 +1719,7 @@ app.post("/api/duty/manual", requireAuth, requirePermission("actions", "manageDu
 });
 
 app.delete("/api/duty/history/:id", requireAuth, requirePermission("actions", "manageDutyHours", "Direktion"), (req, res) => {
-  const entry = req.db.dutyHistory.find((item) => item.id === req.params.id);
-  req.db.dutyHistory = req.db.dutyHistory.filter((item) => item.id !== req.params.id);
-  logAction(req.db, req.user, "Dienstzeit entfernt", entry?.status || req.params.id, { before: entry || null });
-  writeDb(req.db);
-  res.json({ ok: true });
+  res.status(403).json({ error: "Der Dienstzeiten-Log ist nicht löschbar." });
 });
 
 function endAllActiveDuty(db, actor, action = "Alle Dienste beendet") {

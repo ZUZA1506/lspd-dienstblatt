@@ -4279,10 +4279,49 @@ table td.text-left {
   margin: 0;
 }
 
-.force-password-panel {
-  width: min(560px, 100%);
+.force-password-stage {
+  min-height: calc(100vh - 190px);
   display: grid;
-  gap: 14px;
+  place-items: center;
+  gap: 18px;
+  align-content: center;
+}
+
+.force-password-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: #eef6ff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.force-password-brand img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+}
+
+.force-password-panel {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 26px;
+  border-color: rgba(99, 168, 255, .28);
+  background: linear-gradient(180deg, #111b2a, #0d1420);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .28);
+}
+
+.force-password-panel h3,
+.force-password-panel p {
+  margin: 0;
+}
+
+.force-password-panel .login-kicker {
+  color: #74b8ff;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .force-password-panel label {

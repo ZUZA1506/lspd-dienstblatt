@@ -1177,7 +1177,7 @@ app.delete("/api/users/:id", requireAuth, requireRole("Direktion"), (req, res) =
 app.patch("/api/profile/password", requireAuth, (req, res) => {
   const oldPassword = String(req.body.oldPassword || "");
   const newPassword = String(req.body.newPassword || "");
-  if (req.user.passwordHash !== hashPassword(oldPassword)) return res.status(400).json({ error: "Altes Passwort stimmt nicht." });
+  if (!req.user.mustChangePassword && req.user.passwordHash !== hashPassword(oldPassword)) return res.status(400).json({ error: "Altes Passwort stimmt nicht." });
   if (!newPassword) return res.status(400).json({ error: "Neues Passwort darf nicht leer sein." });
   req.user.passwordHash = hashPassword(newPassword);
   req.user.mustChangePassword = false;

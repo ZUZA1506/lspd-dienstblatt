@@ -669,31 +669,42 @@ function renderPasswordChangeRequired() {
   $("#headerIcon").classList.remove("hidden");
   renderDevModeBanner();
   content.innerHTML = `
-    <section class="panel force-password-panel">
-      <h3>Passwort ändern</h3>
-      <p class="muted">Du bist mit dem Standardpasswort angemeldet. Aus Sicherheitsgründen musst du jetzt ein eigenes Passwort festlegen, bevor du das Dienstblatt sehen kannst.</p>
-      <div class="security-note-box">
-        <strong>Passwörter sind geschützt und nicht einsehbar.</strong>
-        <span>Auch die IT kann dein Passwort nicht auslesen. Es kann nur auf das Standardpasswort zurückgesetzt und danach von dir neu gesetzt werden.</span>
+    <section class="force-password-stage">
+      <div class="force-password-brand">
+        <img src="/lspd-logo.png?v=20260515-4" alt="LSPD">
+        <span>LSPD Dienstblatt</span>
       </div>
-      <label>Aktuelles Standardpasswort<input type="password" id="forcedOldPassword" autocomplete="current-password" required></label>
-      <label>Neues Passwort<input type="password" id="forcedNewPassword" autocomplete="new-password" required></label>
-      <p id="forcedPasswordError" class="form-error"></p>
-      <button class="orange-btn" id="saveForcedPassword" type="button">Passwort speichern</button>
+      <div class="panel force-password-panel">
+        <span class="login-kicker">Sicherheitspr?fung</span>
+        <h3>Passwort ?ndern</h3>
+        <p class="muted">Du bist mit dem Standardpasswort angemeldet. Aus Sicherheitsgr?nden musst du jetzt ein eigenes Passwort festlegen, bevor du das Dienstblatt sehen kannst.</p>
+        <div class="security-note-box">
+          <strong>Passw?rter sind gesch?tzt und nicht einsehbar.</strong>
+          <span>Auch die IT kann dein Passwort nicht auslesen. Es kann nur auf das Standardpasswort zur?ckgesetzt und danach von dir neu gesetzt werden.</span>
+        </div>
+        <label>Neues Passwort<input type="password" id="forcedNewPassword" autocomplete="new-password" required></label>
+        <label>Neues Passwort wiederholen<input type="password" id="forcedRepeatPassword" autocomplete="new-password" required></label>
+        <p id="forcedPasswordError" class="form-error"></p>
+        <button class="orange-btn" id="saveForcedPassword" type="button">Passwort speichern</button>
+      </div>
     </section>
   `;
   $("#saveForcedPassword")?.addEventListener("click", saveForcedPassword);
 }
 
 async function saveForcedPassword() {
-  const oldPassword = $("#forcedOldPassword")?.value || "";
   const newPassword = $("#forcedNewPassword")?.value || "";
+  const repeatPassword = $("#forcedRepeatPassword")?.value || "";
   if (!newPassword) {
     $("#forcedPasswordError").textContent = "Bitte ein neues Passwort eintragen.";
     return;
   }
+  if (newPassword !== repeatPassword) {
+    $("#forcedPasswordError").textContent = "Die neuen Passwörter stimmen nicht überein.";
+    return;
+  }
   try {
-    await api("/api/profile/password", { method: "PATCH", body: JSON.stringify({ oldPassword, newPassword }) });
+    await api("/api/profile/password", { method: "PATCH", body: JSON.stringify({ newPassword }) });
     await bootstrap();
   } catch (error) {
     $("#forcedPasswordError").textContent = error.message;

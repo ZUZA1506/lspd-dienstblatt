@@ -4018,6 +4018,85 @@ table td.text-left {
   gap: 12px;
 }
 
+.it-overview-redesign {
+  gap: 14px;
+}
+
+.it-overview-headline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 520px);
+  gap: 14px;
+  align-items: start;
+}
+
+.it-overview-headline h3 {
+  margin: 0 0 4px;
+}
+
+.it-status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.it-status-strip span {
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid #2d4058;
+  border-radius: 8px;
+  background: #101827;
+  color: #9fb2cc;
+  font-size: 12px;
+}
+
+.it-status-strip b {
+  display: block;
+  color: #eaf3ff;
+  font-size: 18px;
+}
+
+.it-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.it-overview-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #263a53;
+  border-radius: 8px;
+  background: rgba(10, 17, 30, .58);
+}
+
+.it-overview-block > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.it-overview-block strong {
+  color: #dceaff;
+}
+
+.it-overview-block small {
+  color: #8fa0b8;
+}
+
+.it-overview-restarts {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(180px, .7fr) minmax(220px, .9fr);
+  align-items: center;
+}
+
+.it-overview-restarts .restart-list {
+  grid-column: 1 / -1;
+}
+
+.compact-actions {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .it-department-position-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -4091,21 +4170,13 @@ table td.text-left {
 
 .it-section-title {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
 }
 
 .it-section-title > span:first-child {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(96, 165, 250, .28);
-  border-radius: 10px;
-  color: #7db4ff;
-  background: rgba(47, 109, 246, .12);
-  font-weight: 900;
+  display: none;
 }
 
 .it-section-title h3,
@@ -4714,6 +4785,15 @@ table td.text-left {
   color: #67a5ff;
   border: 1px solid #2563eb;
   background: rgba(37, 99, 235, .18);
+}
+
+.department-rank-label {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  color: #67a5ff;
+  font-weight: 500;
+  line-height: 1.25;
 }
 
 .department-control-row {
@@ -5670,6 +5750,17 @@ table td.text-left {
   flex: 0 0 auto;
 }
 
+.inline-note-settings {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+}
+
+.inline-note-settings svg {
+  width: 15px;
+  height: 15px;
+}
+
 .file-entry p {
   margin: 5px 0;
   color: #dbe8ff;
@@ -6477,6 +6568,47 @@ table td.text-left {
   stroke-linejoin: round;
 }
 
+.member-rank-col .rank-number {
+  cursor: pointer;
+}
+
+.member-rank-col .rank-number:hover {
+  color: #eef6ff;
+  border-color: #5d9cff;
+  background: #1b2d49;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, .28), 0 0 0 3px rgba(93, 156, 255, .12);
+}
+
+.member-rank-col .rank-number::after {
+  content: attr(data-rank-label);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 25;
+  width: max-content;
+  max-width: 240px;
+  padding: 7px 9px;
+  color: #ecf5ff;
+  border: 1px solid rgba(93, 156, 255, .45);
+  border-radius: 7px;
+  background: #0d1728;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, .38);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.25;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.member-rank-col .rank-number:hover::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .form-error {
   min-height: 18px;
   margin: 0;
@@ -6782,7 +6914,17 @@ table td.text-left {
   }
 
   .it-section-title {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .it-overview-headline,
+  .it-overview-grid,
+  .it-overview-restarts {
+    grid-template-columns: 1fr;
+  }
+
+  .it-status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .it-section-title > .button-row,
@@ -7009,6 +7151,16 @@ table td.text-left {
 
 .calendar-event-settings:hover {
   background: rgba(255, 255, 255, .08);
+}
+
+.file-entry-head .inline-note-settings {
+  position: static;
+  top: auto;
+  right: auto;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 1px solid rgba(121, 145, 184, .25);
+  background: rgba(255, 255, 255, .04);
 }
 
 .event-meta-line {

@@ -682,7 +682,7 @@ function renderNavigation() {
     <button class="nav-btn ${state.page === page ? "active" : ""}" data-page="${escapeHtml(page)}">
       <span class="nav-icon">${iconSvg(page)}</span>
       <span class="nav-label">${escapeHtml(navLabel(page))}</span>
-      ${isPageItOnlyVisible(page) ? `<span class="nav-hidden-eye" title="Nur IT hat Ansicht-Rechte">${iconSvg("EyeOff")}</span>` : ""}
+      ${isInternalSheetPage(page) && isPageViewRestricted(page) ? `<span class="nav-hidden-eye" title="Geschütztes internes Blatt">${iconSvg("Lock")}</span>` : ""}
     </button>
   `).join("");
 
@@ -1165,7 +1165,11 @@ function renderDirektion() {
     return;
   }
   const directionDepartment = state.departments.find((department) => department.id === "direktion");
-  const leaders = directionDepartment?.members.filter((member) => ["Leitung", "Stv. Leitung"].includes(member.position)) || [];
+  const activeDutyCount = state.duty.length;
+  const suspendedCount = state.users.filter((user) => user.accountStatus === "Suspendiert" || user.locked).length;
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentFluctuation = (state.settings.fluctuation || []).filter((entry) => new Date(entry.createdAt).getTime() >= sevenDaysAgo).length;
+  const activeStrikeCount = (state.disciplinary || []).filter((entry) => (entry.type === "Strike" || entry.sanctionType === "Strike") && !entry.archivedAt && (!entry.expiresAt || new Date(entry.expiresAt) > new Date())).length;
   const tabs = [
     ["overview", "Übersicht"],
     ["members", "Mitglieder Verwaltung"],
@@ -1186,10 +1190,16 @@ function renderDirektion() {
         <button class="blue-btn vote-btn">${iconSvg("Abteilungen")} Abstimmung</button>
       </div>
       ${state.directionTab === "overview" ? `
-      <div class="grid-3 internal-stats">
-        <div class="stat-card internal-stat-card"><span>Mitglieder</span><i>${iconSvg("Mitglieder")}</i><strong>${state.users.length}</strong><small>Aktive Accounts</small></div>
-        <div class="stat-card internal-stat-card"><span>Leitung / Stv. Leitung</span><i>${iconSvg("Direktion")}</i><strong>${leaders.length || "-"}</strong><small>${escapeHtml(leaders.map((member) => fullName(member.user)).join(", ") || "Keine Leitung eingetragen")}</small></div>
-        <div class="stat-card internal-stat-card"><span>Fluktuation</span><i>${iconSvg("Mitgliederfluktation")}</i><strong>${state.settings.fluctuation?.length || 0}</strong><small>Personalbewegungen</small></div>
+      <div class="grid-4 internal-stats direction-overview-stats">
+        <div class="stat-card internal-stat-card"><span>Aktive Accounts</span><i>${iconSvg("Mitglieder")}</i><strong>${state.users.length}</strong><small>Aktuell im Dienstblatt</small></div>
+        <div class="stat-card internal-stat-card"><span>Im Dienst</span><i>${iconSvg("Dienstblatt")}</i><strong>${activeDutyCount}</strong><small>Live eingetragene Officer</small></div>
+        <div class="stat-card internal-stat-card"><span>Statusmeldungen</span><i>${iconSvg("Informationen")}</i><strong>${suspendedCount}</strong><small>Gesperrt oder suspendiert</small></div>
+        <div class="stat-card internal-stat-card"><span>Fluktuation 7T</span><i>${iconSvg("Mitgliederfluktation")}</i><strong>${recentFluctuation}</strong><small>Personalbewegungen</small></div>
+      </div>
+      <div class="grid-3 direction-pulse-row">
+        <div class="info-box"><strong>Aktive Strikes</strong><p>${activeStrikeCount}</p></div>
+        <div class="info-box"><strong>Direktionsmitglieder</strong><p>${directionDepartment?.members.length || 0}</p></div>
+        <div class="info-box"><strong>Letzte Bewegung</strong><p>${escapeHtml(state.settings.fluctuation?.[0]?.name || "Keine Eintr?ge")}</p></div>
       </div>
       ${renderDirectionDepartmentContent(directionDepartment)}
       ` : ""}
@@ -1982,7 +1992,8 @@ function departmentTab(department) {
   const selected = state.departmentTabs?.[department.id] || "overview";
   if (selected === "members") return "overview";
   if (selected === "leadership" && !departmentActionAllowed(department, "departmentLeadership")) return "overview";
-  if (["estExam", "moduleExam"].includes(selected) && !isTrainingDepartmentSheet(department)) return "overview";
+  if (selected === "estExam" && !isHumanResourcesDepartmentSheet(department)) return "overview";
+  if (selected === "moduleExam" && !isTrainingDepartmentSheet(department)) return "overview";
   return selected;
 }
 
@@ -1994,6 +2005,11 @@ function setDepartmentTab(department, tab) {
 function isTrainingDepartmentSheet(department) {
   const name = cleanText(department?.name || "");
   return /(training|ausbildung)/i.test(name) && !/(human|humane|ressource|resource)/i.test(name);
+}
+
+function isHumanResourcesDepartmentSheet(department) {
+  const name = cleanText(department?.name || "");
+  return /(human|humane|ressource|resource|hr)/i.test(name);
 }
 
 function departmentsForOverview() {
@@ -2090,46 +2106,56 @@ function collectPermissionEditors() {
 }
 
 function renderITOverviewPanel(editablePages) {
+  const activeDuty = state.duty.length;
+  const protectedPages = editablePages.filter((page) => isInternalSheetPage(page) && isPageViewRestricted(page)).length;
+  const restartTimes = state.settings.restartTimes || [];
   return `
-    <div class="panel it-section-card it-overview-start">
-      <div class="it-section-title">
-        <span>00</span>
-        <div><h3>Übersicht</h3><p class="muted">Schnellzugriff auf die wichtigsten Verwaltungsfunktionen.</p></div>
-      </div>
-      <div class="it-action-grid">
-        <button class="it-tool" id="overviewExportData"><strong>Datensicherung</strong><span>JSON exportieren</span></button>
-        <button class="it-tool" id="overviewImportData"><strong>Datenimport</strong><span>Backup wiederherstellen</span></button>
-        <button class="it-tool" id="overviewCreatePage"><strong>Reiter erstellen</strong><span>Leeres Template-Blatt</span></button>
-        <button class="it-tool" id="overviewCreateDepartment"><strong>Abteilung erstellen</strong><span>Leeres Abteilungsblatt</span></button>
-        <button class="it-tool" id="overviewClearSessions"><strong>Sessions</strong><span>Andere Logins abmelden</span></button>
-        <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="overviewToggleDevMode"><strong>Devmode</strong><span>${state.settings?.devMode ? "Aktiv" : "Aus"}</span></button>
-        <div class="it-tool passive"><strong>Speicher</strong><span>storage/dienstblatt.json</span></div>
-      </div>
-      <div class="restart-overview-card">
+    <div class="panel it-section-card it-overview-start it-overview-redesign">
+      <div class="it-overview-headline">
         <div>
-          <strong>Restarts</strong>
-          <small>T&auml;gliche Uhrzeiten, zu denen aktive Dienste automatisch beendet werden.</small>
+          <h3>IT Übersicht</h3>
+          <p class="muted">Zentrale Verwaltung für Sicherungen, Struktur, Sessions und Restarts.</p>
         </div>
-        <div class="restart-editor">
-          <input id="restartTimeInput" type="time" value="00:00">
-          <button class="blue-btn" id="addRestartTime" type="button">Restartzeit hinzuf&uuml;gen</button>
-        </div>
-        <div class="restart-list">
-          ${(state.settings.restartTimes || []).map((time) => `
-            <span class="restart-chip"><b>${escapeHtml(time)}</b><button class="mini-icon delete-restart-time" type="button" data-time="${escapeHtml(time)}" title="L&ouml;schen">${actionIcon("delete")}</button></span>
-          `).join("") || `<p class="muted">Noch keine Restartzeiten angelegt.</p>`}
+        <div class="it-status-strip">
+          <span><b>${editablePages.length}</b> Reiter</span>
+          <span><b>${state.departments.length}</b> Abteilungen</span>
+          <span><b>${activeDuty}</b> im Dienst</span>
+          <span><b>${protectedPages}</b> geschützt</span>
         </div>
       </div>
-      <div class="grid-4 compact-stats">
-        <div class="stat-card"><span>Reiter</span><strong>${editablePages.length}</strong><small>Verwaltbar</small></div>
-        <div class="stat-card"><span>Abteilungen</span><strong>${state.departments.length}</strong><small>Interne Blätter</small></div>
-        <div class="stat-card"><span>Ränge</span><strong>${state.ranks.length}</strong><small>Dienstränge</small></div>
-        <div class="stat-card"><span>Accounts</span><strong>${state.users.length}</strong><small>Aktive Mitglieder</small></div>
+      <div class="it-overview-grid">
+        <section class="it-overview-block">
+          <div><strong>Daten & Sessions</strong><small>Sichern, importieren und aktive Logins steuern.</small></div>
+          <div class="it-action-grid compact-actions">
+            <button class="it-tool" id="overviewExportData"><strong>Datensicherung</strong><span>JSON exportieren</span></button>
+            <button class="it-tool" id="overviewImportData"><strong>Datenimport</strong><span>Backup wiederherstellen</span></button>
+            <button class="it-tool" id="overviewClearSessions"><strong>Sessions</strong><span>Andere Logins abmelden</span></button>
+          </div>
+        </section>
+        <section class="it-overview-block">
+          <div><strong>Struktur</strong><small>Neue Blätter anlegen und schnell in die Reiterverwaltung springen.</small></div>
+          <div class="it-action-grid compact-actions">
+            <button class="it-tool" id="overviewCreatePage"><strong>Reiter erstellen</strong><span>Leeres Template-Blatt</span></button>
+            <button class="it-tool" id="overviewCreateDepartment"><strong>Abteilung erstellen</strong><span>Abteilungs-Template</span></button>
+            <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="overviewToggleDevMode"><strong>Devmode</strong><span>${state.settings?.devMode ? "Aktiv" : "Aus"}</span></button>
+          </div>
+        </section>
+        <section class="it-overview-block it-overview-restarts">
+          <div><strong>Restarts</strong><small>${restartTimes.length ? `${restartTimes.length} Restartzeit${restartTimes.length === 1 ? "" : "en"} aktiv` : "Noch keine Restartzeit angelegt"}</small></div>
+          <div class="restart-editor">
+            <input id="restartTimeInput" type="time" value="00:00">
+            <button class="blue-btn" id="addRestartTime" type="button">Hinzufügen</button>
+          </div>
+          <div class="restart-list">
+            ${restartTimes.map((time) => `
+              <span class="restart-chip"><b>${escapeHtml(time)}</b><button class="mini-icon delete-restart-time" type="button" data-time="${escapeHtml(time)}" title="Löschen">${actionIcon("delete")}</button></span>
+            `).join("") || `<p class="muted">Noch keine Restartzeiten angelegt.</p>`}
+          </div>
+        </section>
       </div>
     </div>
   `;
 }
-
 function renderITDepartmentPositionsPanel() {
   const departments = state.departments.filter((department) => department.id !== "direktion");
   return `
@@ -2160,8 +2186,8 @@ function renderIT() {
   const editablePages = editableItPages();
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
   const storedItTab = localStorage.getItem("lspd_it_tab") || "overview";
-  const itTabs = [["overview", "Übersicht"], ["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"], ["system", "System"]];
-  const visibleItTabs = itTabs.filter(([id]) => id !== "system");
+  const itTabs = [["overview", "Übersicht"], ["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"]];
+  const visibleItTabs = itTabs;
   const itTab = visibleItTabs.some(([id]) => id === storedItTab) ? storedItTab : "overview";
   content.innerHTML = `
     <section class="it-command-center">
@@ -2169,11 +2195,6 @@ function renderIT() {
         <div>
           <h3><span class="section-icon">${iconSvg("IT")}</span>IT Verwaltung</h3>
           <p class="muted">Systemsteuerung, Rechte, Mitglieder und Ränge übersichtlich getrennt.</p>
-        </div>
-        <div class="it-hero-stats">
-          <span><b>${editablePages.length}</b> Reiter</span>
-          <span><b>${state.ranks.length}</b> Ränge</span>
-          <span><b>${state.users.length}</b> Accounts</span>
         </div>
         <div class="tabs-row it-tabs">
           ${visibleItTabs.map(([id, label]) => `<button class="${itTab === id ? "tab-active" : ""}" data-it-tab="${id}">${label}</button>`).join("")}
@@ -2183,36 +2204,6 @@ function renderIT() {
 
     <section class="it-workbench">
       ${itTab === "overview" ? renderITOverviewPanel(editablePages) : ""}
-      <div class="panel it-section-card it-system-card ${itTab === "system" ? "" : "hidden"}">
-        <div class="it-section-title">
-          <span>01</span>
-          <div><h3>System</h3><p class="muted">Sicherung, Import, Sessions und Devmode.</p></div>
-        </div>
-        <div class="it-action-grid">
-          <button class="it-tool" id="exportDataBtn"><strong>Datensicherung</strong><span>JSON exportieren</span></button>
-          <button class="it-tool" id="importDataBtn"><strong>Datenimport</strong><span>JSON wiederherstellen</span></button>
-          <button class="it-tool" id="clearSessionsBtn"><strong>Sessions</strong><span>Andere Logins abmelden</span></button>
-          <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="toggleDevModeBtn"><strong>Devmode</strong><span>${state.settings?.devMode ? "Aktiv - pro Tab ein Account" : "Aus - normaler Login"}</span></button>
-          <div class="it-tool passive"><strong>Speicher</strong><span>storage/dienstblatt.json</span></div>
-        </div>
-      </div>
-
-      <div class="panel it-section-card it-restarts-card ${itTab === "system" ? "" : "hidden"}">
-        <div class="it-section-title">
-          <span>02</span>
-          <div><h3>Restarts</h3><p class="muted">Tägliche Uhrzeiten, zu denen alle aktiven Dienste automatisch beendet werden.</p></div>
-        </div>
-        <div class="restart-editor">
-          <input id="restartTimeInput" type="time" value="00:00">
-          <button class="blue-btn" id="addRestartTime" type="button">Restartzeit hinzufügen</button>
-        </div>
-        <div class="restart-list">
-          ${(state.settings.restartTimes || []).map((time) => `
-            <span class="restart-chip"><b>${escapeHtml(time)}</b><button class="mini-icon delete-restart-time" type="button" data-time="${escapeHtml(time)}" title="Löschen">${actionIcon("delete")}</button></span>
-          `).join("") || `<p class="muted">Noch keine Restartzeiten angelegt.</p>`}
-        </div>
-      </div>
-
       <div class="panel it-section-card it-pages-card ${itTab === "pages" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>03</span>
@@ -2762,6 +2753,7 @@ function renderDepartmentPage(department) {
   const canInfo = departmentActionAllowed(department, "departmentInfo");
   const canLeadership = departmentActionAllowed(department, "departmentLeadership");
   const isTrainingDepartment = isTrainingDepartmentSheet(department);
+  const isHumanResourcesDepartment = isHumanResourcesDepartmentSheet(department);
   const tab = departmentTab(department);
   content.innerHTML = `
     <section class="internal-subhead department-overview-head">
@@ -2770,7 +2762,7 @@ function renderDepartmentPage(department) {
         <div class="tabs-row department-tabs">
           <button class="${tab === "overview" ? "tab-active" : ""}" data-department-tab="overview">\u00dcbersicht</button>
           ${canLeadership ? `<button class="${tab === "leadership" ? "tab-active" : ""}" data-department-tab="leadership">Leitung</button>` : ""}
-          ${isTrainingDepartment ? `<button class="${tab === "estExam" ? "tab-active" : ""}" data-department-tab="estExam">EST Prüfung</button>` : ""}
+          ${isHumanResourcesDepartment ? `<button class="${tab === "estExam" ? "tab-active" : ""}" data-department-tab="estExam">EST Prüfung</button>` : ""}
           ${isTrainingDepartment ? `<button class="${tab === "moduleExam" ? "tab-active" : ""}" data-department-tab="moduleExam">Ausbildungen</button>` : ""}
         </div>
         ${canInfo ? `<button class="blue-btn vote-btn">${iconSvg("Abteilungen")} Abstimmung</button>` : ""}
@@ -2781,7 +2773,7 @@ function renderDepartmentPage(department) {
       </div>` : ""}
       ${tab === "overview" ? renderDepartmentOverviewPanels(department, canMembers, canNotes) : ""}
       ${tab === "leadership" && canLeadership ? renderDepartmentLeadershipPanel(department) : ""}
-      ${tab === "estExam" && isTrainingDepartment ? renderEstExamPanel(department) : ""}
+      ${tab === "estExam" && isHumanResourcesDepartment ? renderEstExamPanel(department) : ""}
       ${tab === "moduleExam" && isTrainingDepartment ? renderModuleExamPanel(department) : ""}
     </section>
   `;
@@ -5740,7 +5732,7 @@ function renderNavigation() {
       <span class="nav-icon">${iconSvg(page)}</span>
       <span class="nav-label">${escapeHtml(navLabel(page))}</span>
       ${page === "Postfach" && unreadMail ? `<span class="nav-badge">${unreadMail}</span>` : ""}
-      ${isPageItOnlyVisible(page) ? `<span class="nav-hidden-eye" title="Nur IT hat Ansicht-Rechte">${iconSvg("EyeOff")}</span>` : ""}
+      ${isInternalSheetPage(page) && isPageViewRestricted(page) ? `<span class="nav-hidden-eye" title="Geschütztes internes Blatt">${iconSvg("Lock")}</span>` : ""}
     </button>
   `).join("");
 
@@ -5772,7 +5764,7 @@ function renderNavigation() {
     <button class="nav-btn ${state.page === page ? "active" : ""}" data-page="${escapeHtml(page)}">
       <span class="nav-icon">${iconSvg(page)}${page === "Postfach" && unreadMail ? `<span class="nav-badge">${unreadMail}</span>` : ""}</span>
       <span class="nav-label">${escapeHtml(navLabel(page))}</span>
-      ${isPageItOnlyVisible(page) ? `<span class="nav-hidden-eye" title="Nur IT hat Ansicht-Rechte">${iconSvg("EyeOff")}</span>` : ""}
+      ${isInternalSheetPage(page) && isPageViewRestricted(page) ? `<span class="nav-hidden-eye" title="Geschütztes internes Blatt">${iconSvg("Lock")}</span>` : ""}
     </button>
   `).join("");
 
@@ -6850,7 +6842,7 @@ function renderDepartmentMemberTable(department) {
             <tr>
               <td><span class="member-name truncate"><span class="online-dot ${member.isOnDuty ? "online" : ""}"></span>${avatarMarkup(member.user, "sm")}<span>${escapeHtml(fullName(member.user))}</span></span></td>
               <td><span class="position-chip ${positionClass(member.position)}">${escapeHtml(member.position)}</span></td>
-              <td>${escapeHtml(rankLabel(member.user.rank))}</td>
+              <td><span class="department-rank-label">${escapeHtml(rankLabel(member.user.rank))}</span></td>
             </tr>
           `).join("")}
         </tbody>
@@ -7708,7 +7700,7 @@ function closeModal() {
       store.activeExams = (store.activeExams || []).filter((exam) => exam.id !== discardTrainingExamId || exam.startedAt);
       saveTrainingStore(store);
       const department = departmentByPage?.(state.page);
-      if (isTrainingDepartmentSheet(department)) window.setTimeout(() => renderDepartmentPage(department), 0);
+      if (isTrainingDepartmentSheet(department) || isHumanResourcesDepartmentSheet(department)) window.setTimeout(() => renderDepartmentPage(department), 0);
     } catch {
       // Closing a modal should never block the UI.
     }
@@ -8354,11 +8346,12 @@ function renderFileEntry(entry, activeStrike = false, expired = false) {
           ${archived ? `<span class="file-pill archived">${entry.archivedAt ? "Archiviert" : "Abgelaufen"}</span>` : ""}
           ${entry.amount ? `<span class="file-pill fine">${Number(entry.amount).toLocaleString("de-DE")} $</span>` : ""}
           ${entry.paidAt ? `<span class="file-pill paid">Bezahlt</span>` : ""}
+          ${entry.type === "Aktennotiz" ? `<button class="calendar-event-settings note-settings inline-note-settings" data-id="${escapeHtml(entry.id)}" title="Notiz verwalten">${iconSvg("Settings")}</button>` : ""}
         </div>
         <p>${escapeHtml(entry.reason || "-")}</p>
         <small>${formatDateTime(entry.createdAt)} - ${escapeHtml(entry.actorName || "-")}${entry.expiresAt ? ` - Ablauf: ${formatDate(entry.expiresAt)}` : ""}${entry.archivedBy ? ` - Archiviert von ${escapeHtml(entry.archivedBy)}` : ""}</small>
       </div>
-      ${entry.type === "Aktennotiz" ? `<button class="calendar-event-settings note-settings" data-id="${escapeHtml(entry.id)}" title="Notiz verwalten">⚙</button>` : (entry.type === "Sanktion" || entry.type === "Strike") && !entry.archivedAt ? `<button class="ghost-btn remove-file-entry" data-id="${escapeHtml(entry.id)}">Archivieren</button>` : ""}
+      ${(entry.type === "Sanktion" || entry.type === "Strike") && !entry.archivedAt ? `<button class="ghost-btn remove-file-entry" data-id="${escapeHtml(entry.id)}">Archivieren</button>` : ""}
     </article>
   `;
 }
@@ -8815,7 +8808,7 @@ function openDepartmentMemberModal(department, member = null) {
     <h3>${member ? "Position bearbeiten" : "Person hinzufügen"}</h3>
     <p class="muted">Wählen Sie eine Person aus, die zu ${escapeHtml(department.name)} hinzugefügt werden soll.</p>
     ${member ? `<p><strong>${escapeHtml(fullName(member.user))}</strong></p>` : `<label>Person suchen<input id="departmentUserSearch" placeholder="Name oder DN suchen"></label>
-    <label>Person auswählen<select id="departmentUserSelect">${availableUsers.map((user) => `<option value="${user.id}">${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn)}</option>`).join("")}</select></label>`}
+    <label>Person auswählen<select id="departmentUserSelect">${availableUsers.map((user) => `<option value="${user.id}">${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn)} - ${escapeHtml(rankLabel(user.rank))}</option>`).join("")}</select></label>`}
     <label>Position auswählen
       <select id="departmentPositionSelect">
         ${(allowedPositions.length ? allowedPositions : ["Mitglied"]).map((position) => `<option ${member?.position === position ? "selected" : ""}>${escapeHtml(position)}</option>`).join("")}
@@ -8833,7 +8826,7 @@ function openDepartmentMemberModal(department, member = null) {
       const term = search.value.toLowerCase();
       select.innerHTML = availableUsers
         .filter((user) => fullName(user).toLowerCase().includes(term) || String(user.dn).includes(term))
-        .map((user) => `<option value="${user.id}">${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn)}</option>`)
+        .map((user) => `<option value="${user.id}">${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn)} - ${escapeHtml(rankLabel(user.rank))}</option>`)
         .join("");
     });
     modal.querySelector("#saveDepartmentMember").addEventListener("click", async () => {

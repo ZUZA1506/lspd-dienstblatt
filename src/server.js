@@ -431,6 +431,29 @@ function getDepartment(db, departmentId) {
   return db.settings.departments.find((department) => department.id === departmentId);
 }
 
+function syncDirektionMembership(db, user, options = {}) {
+  const department = getDepartment(db, "direktion");
+  if (!department || !user) return;
+  const hasDirektionRole = !user.terminated && user.role === "Direktion";
+  if (options.roleAssigned) user.direktionManualRemoved = false;
+  if (hasDirektionRole) {
+    if (user.direktionManualRemoved) return;
+    if (!department.members.some((member) => member.userId === user.id)) {
+      department.members.push({
+        userId: user.id,
+        position: "Direktion",
+        joinedAt: todayIso(),
+        positionSince: todayIso(),
+        autoRoleDirektion: true
+      });
+    }
+    return;
+  }
+  const beforeLength = department.members.length;
+  department.members = department.members.filter((member) => member.userId !== user.id);
+  if (beforeLength !== department.members.length) user.direktionManualRemoved = false;
+}
+
 function isDepartmentManager(user, department, db = null) {
   if (!department) return false;
   if ((rolePower[user.role] || 0) >= rolePower.IT || user.role === "Direktion") return true;
@@ -813,6 +836,7 @@ app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {
     updatedAt: createdAt
   };
   updateTrainingMeta(user, {}, user.trainings, req.user);
+  syncDirektionMembership(req.db, user, { roleAssigned: user.role === "Direktion" });
 
   req.db.users.push(user);
   logFluctuation(req.db, user, "Eingestellt", req.user);
@@ -835,6 +859,7 @@ app.patch("/api/users/:id", requireAuth, requireRole("Direktion"), (req, res) =>
   if (dnConflict?.error) return res.status(400).json({ error: dnConflict.error });
 
   const before = publicUser(user);
+  const previousRole = user.role;
   const rankChanged = Number(user.rank) !== Number(normalized.value.rank);
   const beforeTrainings = { ...(user.trainings || {}) };
   Object.assign(user, normalized.value, {
@@ -842,6 +867,7 @@ app.patch("/api/users/:id", requireAuth, requireRole("Direktion"), (req, res) =>
     updatedAt: nowIso()
   });
   updateTrainingMeta(user, beforeTrainings, user.trainings, req.user);
+  syncDirektionMembership(req.db, user, { roleAssigned: previousRole !== "Direktion" && user.role === "Direktion" });
 
   const after = publicUser(user);
   logAction(req.db, req.user, "Benutzer bearbeitet", `${user.firstName} ${user.lastName}`.trim(), { before, after, description: userChangeSummary(req.db, before, after) });
@@ -1042,6 +1068,7 @@ app.post("/api/users/:id/rehire", requireAuth, requireRole("Direktion"), (req, r
   updateTrainingMeta(user, beforeTrainings, user.trainings, req.user);
   user.rehiredAt = nowIso();
   user.updatedAt = nowIso();
+  syncDirektionMembership(req.db, user, { roleAssigned: role === "Direktion" });
   logFluctuation(req.db, user, "Eingestellt", req.user);
   req.db.settings.fluctuation[0].reason = String(req.body.reason || "Wiedereinstellung").trim() || "Wiedereinstellung";
   logDisciplinary(req.db, user, "Wiedereinstellung", req.db.settings.fluctuation[0].reason, req.user);
@@ -1429,8 +1456,10 @@ app.post("/api/departments/:departmentId/members", requireAuth, (req, res) => {
   const userId = String(req.body.userId || "");
   const position = departmentPositionsFor(department).includes(req.body.position) ? req.body.position : "Mitglied";
   if (!canAssignDepartmentPosition(req.user, department, position, req.db)) return res.status(403).json({ error: "Diese Position darfst du nicht vergeben." });
-  if (!req.db.users.some((user) => user.id === userId)) return res.status(404).json({ error: "Benutzer nicht gefunden." });
+  const addedUser = req.db.users.find((user) => user.id === userId);
+  if (!addedUser) return res.status(404).json({ error: "Benutzer nicht gefunden." });
   if (department.members.some((member) => member.userId === userId)) return res.status(400).json({ error: "Person ist bereits in der Abteilung." });
+  if (department.id === "direktion" && addedUser.role === "Direktion") addedUser.direktionManualRemoved = false;
   department.members.push({ userId, position, joinedAt: todayIso(), positionSince: todayIso() });
   logAction(req.db, req.user, "Abteilungsmitglied hinzugefügt", department.name, { userId, position });
   writeDb(req.db);
@@ -1455,6 +1484,8 @@ app.patch("/api/departments/:departmentId/members/:userId", requireAuth, (req, r
 app.delete("/api/departments/:departmentId/members/:userId", requireAuth, (req, res) => {
   const department = getDepartment(req.db, req.params.departmentId);
   if (!canManageDepartmentAction(req.user, department, req.db, "departmentMembers")) return res.status(403).json({ error: "Keine Berechtigung." });
+  const removedUser = req.db.users.find((user) => user.id === req.params.userId);
+  if (department?.id === "direktion" && removedUser?.role === "Direktion") removedUser.direktionManualRemoved = true;
   department.members = department.members.filter((member) => member.userId !== req.params.userId);
   logAction(req.db, req.user, "Abteilungsmitglied entfernt", department.name, { userId: req.params.userId });
   writeDb(req.db);

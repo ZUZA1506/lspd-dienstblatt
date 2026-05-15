@@ -8,12 +8,13 @@
     <meta http-equiv="Expires" content="0">
     <title>LSPD Dienstblatt</title>
     <link rel="icon" type="image/png" href="/lspd-logo.png?v=20260515-4">
+    <link rel="preload" as="image" href="/lspd-logo.png?v=20260515-4" fetchpriority="high">
     <link rel="stylesheet" href="/styles.css?v=20260515-4">
   </head>
   <body>
     <div id="loadingView" class="loading-shell">
       <div class="loading-panel">
-        <img src="/lspd-logo.png?v=20260515-4" alt="LSPD">
+        <img src="/lspd-logo.png?v=20260515-4" alt="LSPD" fetchpriority="high" decoding="async">
         <strong>Dienstblatt wird geladen</strong>
         <span></span>
       </div>
@@ -22,7 +23,7 @@
     <div id="loginView" class="login-shell hidden">
       <section class="login-stage">
         <div class="login-intro">
-          <img src="/lspd-logo.png?v=20260515-4" alt="LSPD">
+          <img src="/lspd-logo.png?v=20260515-4" alt="LSPD" fetchpriority="high" decoding="async">
           <p class="eyebrow">Los Santos Police Department</p>
           <h1>LSPD Dienstblatt</h1>
           <p>Interne Verwaltung, Dienstzeiten, Abteilungen und Einsatzinformationen an einem zentralen Ort.</p>

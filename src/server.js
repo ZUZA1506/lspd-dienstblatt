@@ -631,20 +631,31 @@ function evaluateUprank(db, user, targetRank) {
 }
 
 app.use(express.json({ limit: "15mb" }));
-app.use((_req, res, next) => {
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
+app.use((req, res, next) => {
+  const ext = path.extname(req.path).toLowerCase();
+  if (req.path.startsWith("/api/") || !ext) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
   next();
 });
 app.use(express.static(PUBLIC_DIR, {
-  etag: false,
-  lastModified: false,
-  maxAge: 0,
+  etag: true,
+  lastModified: true,
+  maxAge: "1d",
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith(".html")) res.setHeader("Content-Type", "text/html; charset=utf-8");
+    if (filePath.endsWith(".html")) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
     if (filePath.endsWith(".js")) res.setHeader("Content-Type", "application/javascript; charset=utf-8");
     if (filePath.endsWith(".css")) res.setHeader("Content-Type", "text/css; charset=utf-8");
+    if (/\.(png|jpg|jpeg|webp|gif|svg|ico)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
   }
 }));
 
@@ -1701,7 +1712,7 @@ app.post("/api/seizures", requireAuth, (req, res) => {
   const suspect = String(req.body.suspect || "").trim();
   const location = String(req.body.location || "").trim();
   const numberValue = (value) => Math.max(0, Number(value || 0) || 0);
-  const sourceType = ["Normal", "Dealer", "Camper"].includes(String(req.body.sourceType || "").trim()) ? String(req.body.sourceType).trim() : "Normal";
+  const sourceType = ["Dealer", "Camper"].includes(String(req.body.sourceType || "").trim()) ? String(req.body.sourceType).trim() : "";
   const evidenceLinks = Array.isArray(req.body.evidenceLinks)
     ? req.body.evidenceLinks.map((item) => String(item || "").trim()).filter(Boolean)
     : String(req.body.evidenceLink || req.body.weapons || "").split("\n").map((item) => item.trim()).filter(Boolean);
@@ -1757,7 +1768,7 @@ app.patch("/api/seizures/:id", requireAuth, (req, res) => {
     murder: Boolean(req.body.murder),
     blackMoney: numberValue(req.body.blackMoney),
     crates: numberValue(req.body.crates),
-    sourceType: ["Normal", "Dealer", "Camper"].includes(String(req.body.sourceType || "").trim()) ? String(req.body.sourceType).trim() : "Normal",
+    sourceType: ["Dealer", "Camper"].includes(String(req.body.sourceType || "").trim()) ? String(req.body.sourceType).trim() : "",
     vehicleId: String(req.body.vehicleId || "").trim(),
     updatedAt: nowIso(),
     updatedBy: actorName(req.user)

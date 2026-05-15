@@ -158,6 +158,17 @@ const $ = (selector) => document.querySelector(selector);
 const content = $("#content");
 const modalRoot = $("#modalRoot");
 const notifyRoot = $("#notifyRoot");
+const warmedAvatarUrls = new Set();
+
+function warmAvatarCache() {
+  ["/lspd-logo.png?v=20260515-4", ...(state.users || []).map((user) => user.avatarUrl).filter(Boolean)].forEach((url) => {
+    if (warmedAvatarUrls.has(url)) return;
+    warmedAvatarUrls.add(url);
+    const image = new Image();
+    image.decoding = "async";
+    image.src = url;
+  });
+}
 
 function hasRole(minRole) {
   const power = { User: 1, Supervisor: 2, Direktion: 3, IT: 4, "IT-Leitung": 5 };
@@ -223,9 +234,9 @@ function fullName(user = state.currentUser) {
 
 function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
-    return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar" loading="lazy" decoding="async">`;
+    return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar" loading="eager" decoding="async" fetchpriority="high">`;
   }
-  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-4" alt="LSPD" loading="lazy" decoding="async">`;
+  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-4" alt="LSPD" loading="eager" decoding="async" fetchpriority="high">`;
 }
 
 function rankLabel(rank) {
@@ -562,6 +573,7 @@ function showNotify(message, type = "success") {
 async function bootstrap() {
   const data = await api("/api/bootstrap");
   Object.assign(state, data);
+  warmAvatarCache();
   syncDevModeAuthStorage();
   const visiblePages = getVisiblePages();
   if (!visiblePages.includes(state.page)) {
@@ -636,6 +648,7 @@ function renderNavigation() {
 
   document.querySelectorAll(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.page === "IT" && state.page !== "IT") localStorage.setItem("lspd_it_tab", "overview");
       state.page = button.dataset.page;
       localStorage.setItem("lspd_page", state.page);
       renderApp();
@@ -2016,6 +2029,51 @@ function collectPermissionEditors() {
   return permissions;
 }
 
+function renderITOverviewPanel(editablePages) {
+  return `
+    <div class="panel it-section-card it-overview-start">
+      <div class="it-section-title">
+        <span>00</span>
+        <div><h3>Übersicht</h3><p class="muted">Schnellzugriff auf die wichtigsten Verwaltungsfunktionen.</p></div>
+      </div>
+      <div class="it-action-grid">
+        <button class="it-tool" id="overviewExportData"><strong>Datensicherung</strong><span>JSON exportieren</span></button>
+        <button class="it-tool" id="overviewImportData"><strong>Datenimport</strong><span>Backup wiederherstellen</span></button>
+        <button class="it-tool" id="overviewCreatePage"><strong>Reiter erstellen</strong><span>Leeres Template-Blatt</span></button>
+        <button class="it-tool" id="overviewCreateDepartment"><strong>Abteilung erstellen</strong><span>Leeres Abteilungsblatt</span></button>
+        <button class="it-tool ${state.settings?.devMode ? "devmode-on" : ""}" id="overviewToggleDevMode"><strong>Devmode</strong><span>${state.settings?.devMode ? "Aktiv" : "Aus"}</span></button>
+      </div>
+      <div class="grid-4 compact-stats">
+        <div class="stat-card"><span>Reiter</span><strong>${editablePages.length}</strong><small>Verwaltbar</small></div>
+        <div class="stat-card"><span>Abteilungen</span><strong>${state.departments.length}</strong><small>Interne Blätter</small></div>
+        <div class="stat-card"><span>Ränge</span><strong>${state.ranks.length}</strong><small>Dienstränge</small></div>
+        <div class="stat-card"><span>Accounts</span><strong>${state.users.length}</strong><small>Aktive Mitglieder</small></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderITDepartmentPositionsPanel() {
+  const departments = state.departments.filter((department) => department.id !== "direktion");
+  return `
+    <div class="panel it-section-card it-department-positions-card">
+      <div class="it-section-title">
+        <span>04</span>
+        <div><h3>Interne Abteilungsränge</h3><p class="muted">Positionen wie Leitung, Stv. Leitung oder eigene interne Ränge pro Abteilung bearbeiten.</p></div>
+      </div>
+      <div class="it-department-position-grid">
+        ${departments.map((department) => `
+          <article class="department-position-shortcut">
+            <strong>${escapeHtml(department.name)}</strong>
+            <small>${departmentPositionsFor(department).map(escapeHtml).join(" / ")}</small>
+            <button class="ghost-btn edit-department-positions" type="button" data-page-key="dept:${escapeHtml(department.id)}">Positionen bearbeiten</button>
+          </article>
+        `).join("") || `<p class="muted">Keine Abteilungen vorhanden.</p>`}
+      </div>
+    </div>
+  `;
+}
+
 function renderIT() {
   if (!hasRole("IT")) {
     content.innerHTML = `<section class="panel"><h3>Kein Zugriff</h3><p class="muted">Dieser Bereich ist nur für IT sichtbar.</p></section>`;
@@ -2024,8 +2082,8 @@ function renderIT() {
 
   const editablePages = editableItPages();
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
-  const itTab = localStorage.getItem("lspd_it_tab") || "pages";
-  const itTabs = [["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"], ["system", "System"]];
+  const itTab = localStorage.getItem("lspd_it_tab") || "overview";
+  const itTabs = [["overview", "Übersicht"], ["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"], ["system", "System"]];
   content.innerHTML = `
     <section class="it-command-center">
       <div class="panel it-hero-panel it-overview-card">
@@ -2045,6 +2103,7 @@ function renderIT() {
     </section>
 
     <section class="it-workbench">
+      ${itTab === "overview" ? renderITOverviewPanel(editablePages) : ""}
       <div class="panel it-section-card it-system-card ${itTab === "system" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>01</span>
@@ -2102,6 +2161,7 @@ function renderIT() {
         </div>
         <p id="navSaveMessage" class="muted"></p>
       </div>
+      ${itTab === "pages" ? renderITDepartmentPositionsPanel() : ""}
 
       <div class="panel it-section-card it-members-card ${itTab === "members" ? "" : "hidden"}">
         <div class="it-section-title">
@@ -2173,6 +2233,9 @@ function renderIT() {
   document.querySelectorAll(".page-move").forEach((button) => button.addEventListener("click", () => movePageOrder(button.dataset.pageKey, Number(button.dataset.direction))));
   $("#createCustomPage")?.addEventListener("click", () => openCreatePageModal("custom"));
   $("#createDepartmentPage")?.addEventListener("click", () => openCreatePageModal("department"));
+  $("#overviewCreatePage")?.addEventListener("click", () => openCreatePageModal("custom"));
+  $("#overviewCreateDepartment")?.addEventListener("click", () => openCreatePageModal("department"));
+  document.querySelectorAll(".edit-department-positions").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
 
   $("#saveRanks")?.addEventListener("click", async () => {
     const ranks = Array.from(document.querySelectorAll("[data-rank-value]"))
@@ -2210,14 +2273,34 @@ function renderIT() {
     link.click();
     URL.revokeObjectURL(url);
   });
+  $("#overviewExportData")?.addEventListener("click", async () => {
+    const response = await fetch("/api/it/export", { headers: { Authorization: `Bearer ${state.token}` } });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "lspd-dienstblatt-export.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  });
 
   $("#importDataBtn")?.addEventListener("click", openDataImportModal);
+  $("#overviewImportData")?.addEventListener("click", openDataImportModal);
 
   $("#clearSessionsBtn")?.addEventListener("click", async () => {
     await api("/api/it/clear-sessions", { method: "POST", body: "{}" });
   });
 
   $("#toggleDevModeBtn")?.addEventListener("click", async () => {
+    const data = await api("/api/it/devmode", {
+      method: "PATCH",
+      body: JSON.stringify({ devMode: !state.settings?.devMode })
+    });
+    state.settings = data.settings;
+    syncDevModeAuthStorage();
+    renderApp();
+  });
+  $("#overviewToggleDevMode")?.addEventListener("click", async () => {
     const data = await api("/api/it/devmode", {
       method: "PATCH",
       body: JSON.stringify({ devMode: !state.settings?.devMode })
@@ -2607,7 +2690,7 @@ function renderDepartmentPage(department) {
           <button class="${tab === "overview" ? "tab-active" : ""}" data-department-tab="overview">\u00dcbersicht</button>
           ${canLeadership ? `<button class="${tab === "leadership" ? "tab-active" : ""}" data-department-tab="leadership">Leitung</button>` : ""}
           ${isTrainingDepartment ? `<button class="${tab === "estExam" ? "tab-active" : ""}" data-department-tab="estExam">EST Prüfung</button>` : ""}
-          ${isTrainingDepartment ? `<button class="${tab === "moduleExam" ? "tab-active" : ""}" data-department-tab="moduleExam">Modul Prüfungen</button>` : ""}
+          ${isTrainingDepartment ? `<button class="${tab === "moduleExam" ? "tab-active" : ""}" data-department-tab="moduleExam">Ausbildungen</button>` : ""}
         </div>
         ${canInfo ? `<button class="blue-btn vote-btn">${iconSvg("Abteilungen")} Abstimmung</button>` : ""}
       </div>
@@ -3112,7 +3195,7 @@ function legacyRenderModuleExamPanel(department) {
   return `
     <div class="training-exam-layout department-overview-content">
       <section class="panel training-exam-card">
-        <div class="panel-header"><div><h3>Modul Prüfungen</h3><p class="muted">Vorlage für spätere Modulprüfungen aus offenen Ausbildungen.</p></div></div>
+        <div class="panel-header"><div><h3>Ausbildungen</h3><p class="muted">Vorlage für spätere Modulprüfungen aus offenen Ausbildungen.</p></div></div>
         <div class="exam-start-grid">
           <label>Mitglied
             <select>${state.users.map((user) => `<option>${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn || "-")}</option>`).join("")}</select>
@@ -3208,7 +3291,7 @@ function legacyActiveRenderModuleExamPanel(department) {
   return `
     <div class="training-exam-layout department-overview-content">
       <section class="panel training-exam-card">
-        <div class="panel-header"><div><h3>Modul Prüfungen</h3><p class="muted">Modulprüfung erstellen und in einem eigenen Fenster durchführen.</p></div></div>
+        <div class="panel-header"><div><h3>Ausbildungen</h3><p class="muted">Modulprüfung erstellen und in einem eigenen Fenster durchführen.</p></div></div>
         <div class="exam-start-grid">
           <label>Mitglied
             <select id="moduleCandidateSelect"><option value="">Mitglied auswählen</option>${state.users.map((user) => `<option value="${user.id}">${escapeHtml(fullName(user))} - DN ${escapeHtml(user.dn || "-")}</option>`).join("")}</select>
@@ -3330,7 +3413,7 @@ function renderModuleExamPanel(department) {
     <div class="training-exam-layout department-overview-content">
       ${renderActiveTrainingExams("module", department)}
       <section class="panel training-exam-card">
-        <div class="panel-header"><div><h3>Modul Prüfungen</h3><p class="muted">Mitglied und Modul auswählen, danach Prüfung öffnen und starten.</p></div></div>
+        <div class="panel-header"><div><h3>Ausbildungen</h3><p class="muted">Mitglied und Modul auswählen, danach Prüfung öffnen und starten.</p></div></div>
         <div class="module-start-card">
           <label>Mitglied
             ${renderExamUserPicker("moduleCandidateInput", "moduleCandidateList", state.users, "Mitglied auswählen")}
@@ -5582,6 +5665,7 @@ function renderNavigation() {
 
   document.querySelectorAll(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.page === "IT" && state.page !== "IT") localStorage.setItem("lspd_it_tab", "overview");
       state.page = button.dataset.page;
       localStorage.setItem("lspd_page", state.page);
       renderApp();
@@ -5613,6 +5697,7 @@ function renderNavigation() {
 
   document.querySelectorAll(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.page === "IT" && state.page !== "IT") localStorage.setItem("lspd_it_tab", "overview");
       state.page = button.dataset.page;
       localStorage.setItem("lspd_page", state.page);
       renderApp();
@@ -7094,7 +7179,7 @@ function renderSeizures() {
                   <td>${renderEvidenceLinks(item)}</td>
                   <td>${formatMoney(item.blackMoney)}</td>
                   <td>${Number(item.crates || 0) || "-"}</td>
-                  <td><span class="seizure-pill ${item.sourceType === "Dealer" ? "dealer" : item.sourceType === "Camper" ? "camper" : "normal"}">${escapeHtml(item.sourceType || "Normal")}</span></td>
+                  <td><span class="seizure-pill ${item.sourceType === "Dealer" ? "dealer" : item.sourceType === "Camper" ? "camper" : "normal"}">${escapeHtml(item.sourceType && item.sourceType !== "Normal" ? item.sourceType : "-")}</span></td>
                   <td>${escapeHtml(item.vehicleId || "-")}</td>
                   <td>${escapeHtml(item.witness || "-")}</td>
                   <td><span class="seizure-pill ${item.murder ? "yes" : "no"}">${item.murder ? "Ja" : "Nein"}</span></td>
@@ -7196,7 +7281,7 @@ function openDeleteSeizureModal(id) {
 function openSeizureModal(item = null) {
   const isEdit = Boolean(item?.id);
   const evidenceLinks = seizureEvidenceLinks(item || {});
-  const selectedSource = item?.sourceType || "Normal";
+  const selectedSource = ["Dealer", "Camper"].includes(item?.sourceType) ? item.sourceType : "";
   const witnessOptions = state.users
     .filter((user) => !user.terminated)
     .sort((a, b) => fullName(a).localeCompare(fullName(b), "de"))
@@ -7208,9 +7293,8 @@ function openSeizureModal(item = null) {
       <label><span class="required-label">Tatverdächtiger <b>*</b></span><input id="seizureSuspect" value="${escapeHtml(item?.suspect || "")}" placeholder="Name des Tatverdächtigen" required></label>
       <label><span class="required-label">Standort <b>*</b></span><input id="seizureLocation" value="${escapeHtml(item?.location || "")}" placeholder="Ort der Beschlagnahmung" required></label>
       <div class="seizure-source-field full">
-        <span>Art der Beschlagnahmung</span>
         <div class="seizure-source-options">
-          ${["Normal", "Dealer", "Camper"].map((type) => `<label><input type="radio" name="seizureSourceType" value="${type}" ${selectedSource === type ? "checked" : ""}><span>${type}</span></label>`).join("")}
+          ${["Dealer", "Camper"].map((type) => `<label><input class="seizure-source-choice" type="checkbox" value="${type}" ${selectedSource === type ? "checked" : ""}><span>${type}</span></label>`).join("")}
         </div>
       </div>
       <div class="full evidence-field">
@@ -7233,14 +7317,22 @@ function openSeizureModal(item = null) {
       </label>
       <label class="it-toggle seizure-murder-toggle">
         <input id="seizureMurder" type="checkbox" ${item?.murder ? "checked" : ""}>
-        <span>Mord/Totschlag</span>
         <span class="it-toggle-ui"></span>
+        <span>Mord/Totschlag</span>
       </label>
     </div>
     <p id="modalError" class="form-error"></p>
     <div class="modal-actions"><button class="blue-btn full-action" id="saveSeizure">${isEdit ? "Beschlagnahmung speichern" : "Beschlagnahmung eintragen"}</button></div>
   `, (modal) => {
     modal.classList.add("seizure-modal");
+    modal.querySelectorAll(".seizure-source-choice").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        modal.querySelectorAll(".seizure-source-choice").forEach((other) => {
+          if (other !== input) other.checked = false;
+        });
+      });
+    });
     modal.querySelectorAll(".remove-evidence-link").forEach((button) => button.addEventListener("click", () => button.closest(".evidence-input-row")?.remove()));
     modal.querySelector("#saveSeizure").addEventListener("click", async () => {
       try {
@@ -7260,7 +7352,7 @@ function openSeizureModal(item = null) {
             blackMoney: $("#seizureBlackMoney").value,
             crates: $("#seizureCrates").value,
             vehicleId: $("#seizureVehicleId").value,
-            sourceType: document.querySelector("input[name='seizureSourceType']:checked")?.value || "Normal"
+            sourceType: document.querySelector(".seizure-source-choice:checked")?.value || ""
           })
         });
         state.settings = data.settings || { ...state.settings, seizures: [data.seizure, ...(state.settings.seizures || [])] };

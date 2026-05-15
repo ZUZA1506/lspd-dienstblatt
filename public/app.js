@@ -74,6 +74,7 @@ const state = {
   logs: [],
   disciplinary: [],
   departments: [],
+  customPages: [],
   page: localStorage.getItem("lspd_page") || "Dienstblatt",
   directionTab: localStorage.getItem("lspd_direction_tab") || "overview",
   profileTab: localStorage.getItem("lspd_profile_tab") || "Ausbildung",
@@ -222,23 +223,26 @@ function fullName(user = state.currentUser) {
 
 function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
-    return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar">`;
+    return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar" loading="lazy" decoding="async">`;
   }
-  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-4" alt="LSPD">`;
+  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-4" alt="LSPD" loading="lazy" decoding="async">`;
 }
 
 function rankLabel(rank) {
   const found = state.ranks.find((item) => Number(item.value) === Number(rank));
-  return found ? found.label : `Template ${rank} - Rang ${rank}`;
+  const label = found ? found.label : `Template ${rank} - Rang ${rank}`;
+  const clean = String(label).replace(/^\s*\(?\d+\)?\s*/, "").trim();
+  return `(${Number(rank)}) ${clean || `Rang ${rank}`}`;
 }
 
 function rankOptionLabel(rank) {
-  const label = String(rank.label || `Template ${rank.value} - Rang ${rank.value}`);
-  return /\(\d+\)\s*$/.test(label) ? label : `${label} (${rank.value})`;
+  return rankLabel(rank.value);
 }
 
 function navLabel(page) {
   if (isDepartmentPage(page)) return departmentByPage(page)?.name || page;
+  const custom = state.customPages?.find((item) => item.key === page);
+  if (custom) return state.settings?.navLabels?.[page] || custom.name || page;
   return state.settings?.navLabels?.[page] || page;
 }
 
@@ -268,6 +272,7 @@ function iconSvg(page) {
     "Profil": '<circle cx="12" cy="8" r="4"/><path d="M6 21a6 6 0 0 1 12 0"/>',
     "Kalender": '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M16 3v4M8 3v4M4 10h16"/>',
     "Settings": '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2 .4l-.2.2-3.8-2.2.1-.3a1.8 1.8 0 0 0-.8-1.8 1.8 1.8 0 0 0-2 .1l-.3.2-3.3-2 .1-.3a1.8 1.8 0 0 0-.4-2l-.2-.2 2-3.4.3.1a1.8 1.8 0 0 0 2-.4l.2-.2 3.8 2.2-.1.3a1.8 1.8 0 0 0 .8 1.8 1.8 1.8 0 0 0 2-.1l.3-.2 3.3 2Z"/>',
+    "ChevronUp": '<path d="m18 15-6-6-6 6"/>',
     "ChevronDown": '<path d="m6 9 6 6 6-6"/>',
     "Plus": '<path d="M12 5v14M5 12h14"/>',
     "Lock": '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
@@ -642,11 +647,13 @@ function getVisiblePages() {
   const departmentNav = (state.departments || [])
     .filter((department) => department.id !== "direktion" && department.canOpen)
     .map((department) => `dept:${department.id}`);
-  return [
+  const basePages = [
     ...pages.filter(canSeeDepartment),
     ...adminPages.filter(canSeeDepartment),
+    ...(state.customPages || []).map((page) => page.key).filter(canSeeDepartment),
     ...departmentNav.filter(canSeeDepartment)
   ];
+  return orderPages(basePages);
 }
 
 function renderTopbar() {
@@ -784,7 +791,7 @@ function renderDutyTable() {
             const user = entry.user || state.users.find((item) => item.id === entry.userId);
             return `
               <tr>
-                <td>${escapeHtml(rankLabel(user?.rank))} (Rang ${escapeHtml(user?.rank)})</td>
+                <td>${escapeHtml(rankLabel(user?.rank))}</td>
                 <td><span class="member-name">${avatarMarkup(user, "sm")}${escapeHtml(fullName(user))}</span></td>
                 <td>${formatTime(entry.startedAt)}</td>
                 <td>${escapeHtml(user?.phone || "-")}</td>
@@ -1861,7 +1868,22 @@ function renderFluctuation() {
 }
 
 function editableItPages() {
-  return [...pages, ...adminPages, ...state.departments.filter((department) => department.id !== "direktion").map((department) => `dept:${department.id}`)];
+  return orderPages([...pages, ...adminPages, ...(state.customPages || []).map((page) => page.key), ...state.departments.filter((department) => department.id !== "direktion").map((department) => `dept:${department.id}`)]);
+}
+
+function orderPages(items) {
+  const unique = [...new Set(items.filter(Boolean))];
+  const order = state.settings?.pageOrder || [];
+  const weight = new Map(order.map((page, index) => [page, index]));
+  return unique.sort((a, b) => {
+    const aWeight = weight.has(a) ? weight.get(a) : 10000 + unique.indexOf(a);
+    const bWeight = weight.has(b) ? weight.get(b) : 10000 + unique.indexOf(b);
+    return aWeight - bWeight;
+  });
+}
+
+function isCustomPage(page) {
+  return (state.customPages || []).some((item) => item.key === page);
 }
 
 function isInternalSheetPage(page) {
@@ -2002,6 +2024,8 @@ function renderIT() {
 
   const editablePages = editableItPages();
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
+  const itTab = localStorage.getItem("lspd_it_tab") || "pages";
+  const itTabs = [["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"], ["system", "System"]];
   content.innerHTML = `
     <section class="it-command-center">
       <div class="panel it-hero-panel it-overview-card">
@@ -2015,10 +2039,13 @@ function renderIT() {
           <span><b>${state.users.length}</b> Accounts</span>
         </div>
       </div>
+      <div class="tabs-row it-tabs">
+        ${itTabs.map(([id, label]) => `<button class="${itTab === id ? "tab-active" : ""}" data-it-tab="${id}">${label}</button>`).join("")}
+      </div>
     </section>
 
     <section class="it-workbench">
-      <div class="panel it-section-card it-system-card">
+      <div class="panel it-section-card it-system-card ${itTab === "system" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>01</span>
           <div><h3>System</h3><p class="muted">Sicherung, Import, Sessions und Devmode.</p></div>
@@ -2032,7 +2059,7 @@ function renderIT() {
         </div>
       </div>
 
-      <div class="panel it-section-card it-restarts-card">
+      <div class="panel it-section-card it-restarts-card ${itTab === "system" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>02</span>
           <div><h3>Restarts</h3><p class="muted">Tägliche Uhrzeiten, zu denen alle aktiven Dienste automatisch beendet werden.</p></div>
@@ -2048,11 +2075,15 @@ function renderIT() {
         </div>
       </div>
 
-      <div class="panel it-section-card it-pages-card">
+      <div class="panel it-section-card it-pages-card ${itTab === "pages" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>03</span>
           <div><h3>Reiter & Rechte</h3><p class="muted">Namen ändern und Rechte direkt pro Reiter öffnen.</p></div>
-          <button class="blue-btn" id="saveNavLabels" type="button">Speichern</button>
+          <div class="button-row">
+            <button class="ghost-btn" id="createCustomPage" type="button">Reiter erstellen</button>
+            <button class="ghost-btn" id="createDepartmentPage" type="button">Abteilung erstellen</button>
+            <button class="blue-btn" id="saveNavLabels" type="button">Speichern</button>
+          </div>
         </div>
         <div class="edit-list it-compact-list">
           ${editablePages.map((page, index) => `
@@ -2061,6 +2092,10 @@ function renderIT() {
               <span class="edit-icon">${iconSvg(page)}</span>
               <span class="edit-name">${isPageViewRestricted(page) ? `<span class="page-lock" title="Ansehen ist eingeschränkt">${iconSvg("Lock")}</span>` : ""}${escapeHtml(isDepartmentPage(page) ? navLabel(page) : page)}</span>
               <input data-nav-key="${escapeHtml(page)}" value="${escapeHtml(navLabel(page))}">
+              <span class="page-order-controls">
+                <button class="mini-icon page-move" type="button" data-page-key="${escapeHtml(page)}" data-direction="-1" title="Nach oben">${iconSvg("ChevronUp")}</button>
+                <button class="mini-icon page-move" type="button" data-page-key="${escapeHtml(page)}" data-direction="1" title="Nach unten">${iconSvg("ChevronDown")}</button>
+              </span>
               <button class="mini-icon page-permission-open" type="button" data-page-key="${escapeHtml(page)}" title="Rechte verwalten" aria-label="Rechte verwalten">${actionIcon("edit")}</button>
             </label>
           `).join("")}
@@ -2068,7 +2103,7 @@ function renderIT() {
         <p id="navSaveMessage" class="muted"></p>
       </div>
 
-      <div class="panel it-section-card it-members-card">
+      <div class="panel it-section-card it-members-card ${itTab === "members" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>04</span>
           <div><h3>Mitglieder</h3><p class="muted">Accounts, Ränge und IT-Zugänge direkt im IT-Blatt bearbeiten.</p></div>
@@ -2085,7 +2120,7 @@ function renderIT() {
         </div>
       </div>
 
-      <div class="panel it-section-card it-ranks-card">
+      <div class="panel it-section-card it-ranks-card ${itTab === "ranks" ? "" : "hidden"}">
         <div class="it-section-title">
           <span>05</span>
           <div><h3>Ränge</h3><p class="muted">Rangnamen bearbeiten, hinzufügen oder entfernen.</p></div>
@@ -2110,7 +2145,14 @@ function renderIT() {
 
   `;
 
-  $("#saveNavLabels").addEventListener("click", async () => {
+  document.querySelectorAll("[data-it-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      localStorage.setItem("lspd_it_tab", button.dataset.itTab);
+      renderIT();
+    });
+  });
+
+  $("#saveNavLabels")?.addEventListener("click", async () => {
     const navLabels = {};
     document.querySelectorAll("[data-nav-key]").forEach((input) => {
       navLabels[input.dataset.navKey] = input.value;
@@ -2128,7 +2170,11 @@ function renderIT() {
     }
   });
 
-  $("#saveRanks").addEventListener("click", async () => {
+  document.querySelectorAll(".page-move").forEach((button) => button.addEventListener("click", () => movePageOrder(button.dataset.pageKey, Number(button.dataset.direction))));
+  $("#createCustomPage")?.addEventListener("click", () => openCreatePageModal("custom"));
+  $("#createDepartmentPage")?.addEventListener("click", () => openCreatePageModal("department"));
+
+  $("#saveRanks")?.addEventListener("click", async () => {
     const ranks = Array.from(document.querySelectorAll("[data-rank-value]"))
       .sort((a, b) => Number(a.dataset.rankValue) - Number(b.dataset.rankValue))
       .map((input) => ({ value: Number(input.dataset.rankValue), label: input.value }));
@@ -2144,8 +2190,8 @@ function renderIT() {
     }
   });
 
-  $("#addRank").addEventListener("click", openAddRankModal);
-  $("#removeRank").addEventListener("click", openRemoveRankModal);
+  $("#addRank")?.addEventListener("click", openAddRankModal);
+  $("#removeRank")?.addEventListener("click", openRemoveRankModal);
   $("#itCreateMember")?.addEventListener("click", () => openUserModal());
   document.querySelectorAll(".it-edit-member").forEach((button) => button.addEventListener("click", () => openUserModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".page-permission-open").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
@@ -2154,7 +2200,7 @@ function renderIT() {
     button.addEventListener("click", (event) => event.stopPropagation());
   });
 
-  $("#exportDataBtn").addEventListener("click", async () => {
+  $("#exportDataBtn")?.addEventListener("click", async () => {
     const response = await fetch("/api/it/export", { headers: { Authorization: `Bearer ${state.token}` } });
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -2167,7 +2213,7 @@ function renderIT() {
 
   $("#importDataBtn")?.addEventListener("click", openDataImportModal);
 
-  $("#clearSessionsBtn").addEventListener("click", async () => {
+  $("#clearSessionsBtn")?.addEventListener("click", async () => {
     await api("/api/it/clear-sessions", { method: "POST", body: "{}" });
   });
 
@@ -2193,6 +2239,52 @@ async function saveRestartTimes(times) {
   });
   state.settings = data.settings;
   renderIT();
+}
+
+async function movePageOrder(page, direction) {
+  const list = editableItPages();
+  const index = list.indexOf(page);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= list.length) return;
+  const next = [...list];
+  [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+  const data = await api("/api/it/page-order", { method: "PATCH", body: JSON.stringify({ pageOrder: next }) });
+  state.settings = data.settings;
+  renderNavigation();
+  renderIT();
+}
+
+function openCreatePageModal(type) {
+  const isDepartment = type === "department";
+  openModal(`
+    <h3>${isDepartment ? "Abteilung erstellen" : "Reiter erstellen"}</h3>
+    <p class="muted">${isDepartment ? "Erstellt ein leeres Abteilungsblatt mit Übersicht, Leitung und Notizen." : "Erstellt einen leeren Template-Reiter."}</p>
+    <label>Name<input id="newPageName" placeholder="${isDepartment ? "z.B. Detective" : "z.B. Dienstanweisungen"}"></label>
+    <p id="modalError" class="form-error"></p>
+    <div class="modal-actions">
+      <button class="ghost-btn" data-close>Abbrechen</button>
+      <button class="blue-btn" id="confirmCreatePage">Erstellen</button>
+    </div>
+  `, (modal) => {
+    modal.querySelector("#confirmCreatePage").addEventListener("click", async () => {
+      try {
+        const name = modal.querySelector("#newPageName").value.trim();
+        const data = await api(isDepartment ? "/api/it/departments" : "/api/it/custom-pages", {
+          method: "POST",
+          body: JSON.stringify({ name })
+        });
+        state.settings = data.settings || state.settings;
+        if (Array.isArray(data.departments)) state.departments = data.departments;
+        if (Array.isArray(data.settings?.customPages)) state.customPages = data.settings.customPages;
+        else if (!isDepartment && data.page) state.customPages = [...(state.customPages || []), data.page];
+        closeModal();
+        renderNavigation();
+        renderIT();
+      } catch (error) {
+        modal.querySelector("#modalError").textContent = error.message;
+      }
+    });
+  });
 }
 
 function openDataImportModal() {
@@ -2435,9 +2527,12 @@ function openRemoveRankModal() {
 }
 
 function renderDepartmentsOverview() {
+  const departments = orderPages(state.departments.map((department) => `dept:${department.id}`))
+    .map((page) => departmentByPage(page))
+    .filter(Boolean);
   content.innerHTML = `
     <section class="department-grid">
-      ${state.departments.map((department) => renderDepartmentCard(department)).join("")}
+      ${departments.map((department) => renderDepartmentCard(department)).join("")}
     </section>
   `;
 
@@ -6935,6 +7030,7 @@ function renderSeizures() {
       seizureEvidenceLinks(item).join(" "),
       item.witness,
       item.sourceType,
+      item.vehicleId,
       item.officerName
     ].join(" ").toLowerCase();
     return haystack.includes(search.toLowerCase());
@@ -6942,6 +7038,7 @@ function renderSeizures() {
   const totalBlackMoney = statItems.reduce((sum, item) => sum + (Number(item.blackMoney) || 0), 0);
   const totalCrates = statItems.reduce((sum, item) => sum + (Number(item.crates) || 0), 0);
   const dealerCount = statItems.filter((item) => item.sourceType === "Dealer").length;
+  const camperCount = statItems.filter((item) => item.sourceType === "Camper").length;
   const canDelete = hasRole("Direktion");
   const canEditAll = hasRole("Direktion");
   const ranges = ["Heute", "Woche", "Monat", "Gesamt"];
@@ -6954,7 +7051,7 @@ function renderSeizures() {
         <article class="stat-card"><span>Einträge</span><strong>${statItems.length}</strong><small>${escapeHtml(statRange)} erfasst</small></article>
         <article class="stat-card"><span>Schwarzgeld</span><strong>${totalBlackMoney.toLocaleString("de-DE")}$</strong><small>Gesamtmenge</small></article>
         <article class="stat-card"><span>Kisten</span><strong>${totalCrates.toLocaleString("de-DE")}</strong><small>Gesamtmenge</small></article>
-        <article class="stat-card"><span>Dealer</span><strong>${dealerCount}</strong><small>Dealer-Beschlagnahmungen</small></article>
+        <article class="stat-card"><span>Dealer / Camper</span><strong>${dealerCount} / ${camperCount}</strong><small>Besondere Fundarten</small></article>
       </div>
       <div class="seizure-stats-head">
         <span>Zeitraum</span>
@@ -6981,6 +7078,7 @@ function renderSeizures() {
                 <th>Schwarzgeld</th>
                 <th>Kisten</th>
                 <th>Art</th>
+                <th>KFZ / Kennzeichen</th>
                 <th>Officer</th>
                 <th>Mord/Totschlag</th>
                 <th>Zeitstempel</th>
@@ -6996,14 +7094,15 @@ function renderSeizures() {
                   <td>${renderEvidenceLinks(item)}</td>
                   <td>${formatMoney(item.blackMoney)}</td>
                   <td>${Number(item.crates || 0) || "-"}</td>
-                  <td><span class="seizure-pill ${item.sourceType === "Dealer" ? "dealer" : "normal"}">${escapeHtml(item.sourceType || "Normal")}</span></td>
+                  <td><span class="seizure-pill ${item.sourceType === "Dealer" ? "dealer" : item.sourceType === "Camper" ? "camper" : "normal"}">${escapeHtml(item.sourceType || "Normal")}</span></td>
+                  <td>${escapeHtml(item.vehicleId || "-")}</td>
                   <td>${escapeHtml(item.witness || "-")}</td>
                   <td><span class="seizure-pill ${item.murder ? "yes" : "no"}">${item.murder ? "Ja" : "Nein"}</span></td>
                   <td>${formatDateTime(item.createdAt)}</td>
                   <td>${escapeHtml(item.officerName || "-")}</td>
                   <td>${canEditAll || item.officerId === state.currentUser.id ? `<button class="mini-icon seizure-actions gear-action" data-id="${escapeHtml(item.id)}" title="Aktionen">${iconSvg("Settings")}</button>` : `<span class="muted">-</span>`}</td>
                 </tr>
-              `).join("") || `<tr><td colspan="11" class="empty-table">Keine Beschlagnahmungen gefunden.</td></tr>`}
+              `).join("") || `<tr><td colspan="12" class="empty-table">Keine Beschlagnahmungen gefunden.</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -7097,16 +7196,23 @@ function openDeleteSeizureModal(id) {
 function openSeizureModal(item = null) {
   const isEdit = Boolean(item?.id);
   const evidenceLinks = seizureEvidenceLinks(item || {});
+  const selectedSource = item?.sourceType || "Normal";
   const witnessOptions = state.users
     .filter((user) => !user.terminated)
     .sort((a, b) => fullName(a).localeCompare(fullName(b), "de"))
     .map((user) => `<option value="${escapeHtml(fullName(user))}" ${item?.witness === fullName(user) ? "selected" : ""}>${escapeHtml(fullName(user))} (${escapeHtml(user.dn || "-")})</option>`)
     .join("");
   openModal(`
-    <div class="seizure-modal-head"><span>${iconSvg(isEdit ? "Settings" : "Plus")}</span><h3>${isEdit ? "Beschlagnahmung bearbeiten" : "Neue Beschlagnahmung"}</h3></div>
+    <div class="seizure-modal-head"><span>${iconSvg(isEdit ? "Settings" : "Plus")}</span><div><h3>${isEdit ? "Beschlagnahmung bearbeiten" : "Neue Beschlagnahmung"}</h3><p class="muted">Pflichtfelder ausfüllen, optionale Angaben nur bei Bedarf ergänzen.</p></div></div>
     <div class="seizure-modal-grid">
       <label><span class="required-label">Tatverdächtiger <b>*</b></span><input id="seizureSuspect" value="${escapeHtml(item?.suspect || "")}" placeholder="Name des Tatverdächtigen" required></label>
       <label><span class="required-label">Standort <b>*</b></span><input id="seizureLocation" value="${escapeHtml(item?.location || "")}" placeholder="Ort der Beschlagnahmung" required></label>
+      <div class="seizure-source-field full">
+        <span>Art der Beschlagnahmung</span>
+        <div class="seizure-source-options">
+          ${["Normal", "Dealer", "Camper"].map((type) => `<label><input type="radio" name="seizureSourceType" value="${type}" ${selectedSource === type ? "checked" : ""}><span>${type}</span></label>`).join("")}
+        </div>
+      </div>
       <div class="full evidence-field">
         <div class="field-title required-label">Beweise <b>*</b></div>
         <div id="evidenceLinkList" class="evidence-input-list">
@@ -7118,13 +7224,7 @@ function openSeizureModal(item = null) {
       </div>
       <label>Schwarzgeld Menge<input id="seizureBlackMoney" type="number" min="0" step="1" value="${escapeHtml(item?.blackMoney || "")}" placeholder="0"></label>
       <label>Kisten Menge<input id="seizureCrates" type="number" min="0" step="1" value="${escapeHtml(item?.crates || "")}" placeholder="0"></label>
-      <div class="seizure-source-field">
-        <span>Fundart</span>
-        <div class="seizure-source-options">
-          <label><input type="radio" name="seizureSourceType" value="Normal" ${item?.sourceType !== "Dealer" ? "checked" : ""}><span>Normal</span></label>
-          <label><input type="radio" name="seizureSourceType" value="Dealer" ${item?.sourceType === "Dealer" ? "checked" : ""}><span>Dealer</span></label>
-        </div>
-      </div>
+      <label>KFZ ID / Kennzeichen<input id="seizureVehicleId" value="${escapeHtml(item?.vehicleId || "")}" placeholder="Optional"></label>
       <label>Zeuge / Officer
         <select id="seizureWitness">
           <option value="" ${item?.witness ? "" : "selected"}>Officer auswählen...</option>
@@ -7159,6 +7259,7 @@ function openSeizureModal(item = null) {
             murder: $("#seizureMurder").checked,
             blackMoney: $("#seizureBlackMoney").value,
             crates: $("#seizureCrates").value,
+            vehicleId: $("#seizureVehicleId").value,
             sourceType: document.querySelector("input[name='seizureSourceType']:checked")?.value || "Normal"
           })
         });

@@ -158,6 +158,8 @@ function ensureStorage() {
       defconUpdatedAt: createdAt,
       ranks: defaultRanks(),
       navLabels: {},
+      customPages: [],
+      pageOrder: [],
       departments: defaultDepartments(),
       informationText: "Hier können später zentrale Informationen für alle Officer gepflegt werden.",
       applicationStatus: "Offen",
@@ -201,6 +203,8 @@ function readDb() {
   db.settings = db.settings || {};
   db.settings.ranks = Array.isArray(db.settings.ranks) && db.settings.ranks.length ? db.settings.ranks : defaultRanks();
   db.settings.navLabels = db.settings.navLabels || {};
+  db.settings.customPages = Array.isArray(db.settings.customPages) ? db.settings.customPages : [];
+  db.settings.pageOrder = Array.isArray(db.settings.pageOrder) ? db.settings.pageOrder : [];
   db.settings.departments = normalizeDepartments(db.settings.departments);
   db.settings.informationText = db.settings.informationText || "Hier können später zentrale Informationen für alle Officer gepflegt werden.";
   db.settings.applicationStatus = db.settings.applicationStatus || "Offen";
@@ -235,7 +239,7 @@ function readDb() {
 function normalizeDepartments(existingDepartments) {
   const defaults = defaultDepartments();
   const existing = Array.isArray(existingDepartments) ? existingDepartments : [];
-  return defaults.map((department) => {
+  const normalizedDefaults = defaults.map((department) => {
     const stored = existing.find((item) => item.id === department.id || item.name === department.name);
     return {
       ...department,
@@ -250,6 +254,22 @@ function normalizeDepartments(existingDepartments) {
       memberNotes: Array.isArray(stored?.memberNotes) ? stored.memberNotes : department.memberNotes
     };
   });
+  const defaultIds = new Set(defaults.map((department) => department.id));
+  const custom = existing
+    .filter((department) => department?.id && !defaultIds.has(department.id))
+    .map((department) => ({
+      ...makeDepartment(department.id, department.name || "Neue Abteilung", department.description || "Leeres Abteilungsblatt", department.applicationStatus || "Offen"),
+      ...department,
+      rightsText: String(department.rightsText || ""),
+      links: Array.isArray(department.links) ? department.links : [],
+      permits: Array.isArray(department.permits) ? department.permits : [],
+      factions: Array.isArray(department.factions) ? department.factions : [],
+      positions: normalizeDepartmentPositions(department.positions || departmentPositions),
+      members: Array.isArray(department.members) ? department.members : [],
+      notes: Array.isArray(department.notes) ? department.notes : [],
+      memberNotes: Array.isArray(department.memberNotes) ? department.memberNotes : []
+    }));
+  return [...normalizedDefaults, ...custom];
 }
 
 function normalizeDepartmentPositions(value) {
@@ -697,6 +717,7 @@ app.get("/api/bootstrap", requireAuth, (req, res) => {
     roles,
     departmentPositions,
     settings: req.db.settings,
+    customPages: req.db.settings.customPages || [],
     departments: req.db.settings.departments.map((department) => publicDepartment(department, req.db, req.user)),
     notes: [...req.db.notes].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
     dutyHistory: (req.db.dutyHistory || []).map((entry) => ({
@@ -1226,6 +1247,60 @@ app.patch("/api/it/nav-labels", requireAuth, requireRole("IT"), (req, res) => {
   });
 });
 
+app.patch("/api/it/page-order", requireAuth, requireRole("IT"), (req, res) => {
+  const pageOrder = Array.isArray(req.body.pageOrder) ? req.body.pageOrder.map(String).filter(Boolean) : [];
+  const before = req.db.settings.pageOrder || [];
+  req.db.settings.pageOrder = [...new Set(pageOrder)];
+  logAction(req.db, req.user, "Reiter sortiert", "IT", { before, after: req.db.settings.pageOrder });
+  writeDb(req.db);
+  res.json({ settings: req.db.settings });
+});
+
+app.post("/api/it/custom-pages", requireAuth, requireRole("IT"), (req, res) => {
+  const name = String(req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Name ist erforderlich." });
+  req.db.settings.customPages = Array.isArray(req.db.settings.customPages) ? req.db.settings.customPages : [];
+  const existingKeys = new Set([
+    ...req.db.settings.customPages.map((page) => page.key),
+    ...req.db.settings.departments.map((department) => `dept:${department.id}`)
+  ]);
+  let base = `custom:${slugify(name)}`;
+  let key = base;
+  let index = 2;
+  while (existingKeys.has(key)) key = `${base}-${index++}`;
+  const page = { key, name, createdAt: nowIso() };
+  req.db.settings.customPages.push(page);
+  req.db.settings.navLabels = { ...(req.db.settings.navLabels || {}), [key]: name };
+  req.db.settings.permissions = normalizePermissions(req.db.settings.permissions || {});
+  req.db.settings.permissions.pages[key] = { all: false, roles: ["IT", "IT-Leitung"], ranks: [], users: [], departments: [], positions: [] };
+  req.db.settings.pageOrder = [...new Set([...(req.db.settings.pageOrder || []), key])];
+  logAction(req.db, req.user, "Reiter erstellt", name, { after: page });
+  writeDb(req.db);
+  res.status(201).json({ page, settings: req.db.settings });
+});
+
+app.post("/api/it/departments", requireAuth, requireRole("IT"), (req, res) => {
+  const name = String(req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Name ist erforderlich." });
+  const existingIds = new Set(req.db.settings.departments.map((department) => department.id));
+  let base = slugify(name, "abteilung");
+  let id = base;
+  let index = 2;
+  while (existingIds.has(id)) id = `${base}-${index++}`;
+  const department = makeDepartment(id, name, "Leeres Abteilungsblatt", "Offen");
+  req.db.settings.departments.push(department);
+  req.db.settings.permissions = normalizePermissions(req.db.settings.permissions || {});
+  req.db.settings.permissions.pages[`dept:${id}`] = { all: false, roles: ["IT", "IT-Leitung"], ranks: [], users: [], departments: [], positions: [] };
+  req.db.settings.pageOrder = [...new Set([...(req.db.settings.pageOrder || []), `dept:${id}`])];
+  logAction(req.db, req.user, "Abteilung erstellt", name, { after: department });
+  writeDb(req.db);
+  res.status(201).json({
+    department: publicDepartment(department, req.db, req.user),
+    settings: req.db.settings,
+    departments: req.db.settings.departments.map((item) => publicDepartment(item, req.db, req.user))
+  });
+});
+
 app.patch("/api/it/permissions", requireAuth, requireRole("IT"), (req, res) => {
   const before = req.db.settings.permissions || defaultPermissions();
   req.db.settings.permissions = normalizePermissions(req.body.permissions || {});
@@ -1626,7 +1701,7 @@ app.post("/api/seizures", requireAuth, (req, res) => {
   const suspect = String(req.body.suspect || "").trim();
   const location = String(req.body.location || "").trim();
   const numberValue = (value) => Math.max(0, Number(value || 0) || 0);
-  const sourceType = String(req.body.sourceType || "Normal").trim() === "Dealer" ? "Dealer" : "Normal";
+  const sourceType = ["Normal", "Dealer", "Camper"].includes(String(req.body.sourceType || "").trim()) ? String(req.body.sourceType).trim() : "Normal";
   const evidenceLinks = Array.isArray(req.body.evidenceLinks)
     ? req.body.evidenceLinks.map((item) => String(item || "").trim()).filter(Boolean)
     : String(req.body.evidenceLink || req.body.weapons || "").split("\n").map((item) => item.trim()).filter(Boolean);
@@ -1646,6 +1721,7 @@ app.post("/api/seizures", requireAuth, (req, res) => {
     blackMoney: numberValue(req.body.blackMoney),
     crates: numberValue(req.body.crates),
     sourceType,
+    vehicleId: String(req.body.vehicleId || "").trim(),
     officerId: req.user.id,
     officerName: actorName(req.user),
     createdAt: nowIso()
@@ -1681,7 +1757,8 @@ app.patch("/api/seizures/:id", requireAuth, (req, res) => {
     murder: Boolean(req.body.murder),
     blackMoney: numberValue(req.body.blackMoney),
     crates: numberValue(req.body.crates),
-    sourceType: String(req.body.sourceType || "Normal").trim() === "Dealer" ? "Dealer" : "Normal",
+    sourceType: ["Normal", "Dealer", "Camper"].includes(String(req.body.sourceType || "").trim()) ? String(req.body.sourceType).trim() : "Normal",
+    vehicleId: String(req.body.vehicleId || "").trim(),
     updatedAt: nowIso(),
     updatedBy: actorName(req.user)
   });
@@ -1789,6 +1866,17 @@ function currentBerlinRestartWindow() {
     date: `${parts.year}-${parts.month}-${parts.day}`,
     time: `${parts.hour}:${parts.minute}`
   };
+}
+
+function slugify(value, prefix = "seite") {
+  const slug = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || prefix;
 }
 
 function runScheduledRestarts() {

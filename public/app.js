@@ -2118,6 +2118,7 @@ function renderIT() {
     try {
       const data = await api("/api/it/nav-labels", { method: "PATCH", body: JSON.stringify({ navLabels }) });
       state.settings.navLabels = data.navLabels;
+      if (Array.isArray(data.departments)) state.departments = data.departments;
       $("#navSaveMessage").textContent = "Reiter gespeichert.";
       renderNavigation();
       renderTopbar();

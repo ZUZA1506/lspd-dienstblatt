@@ -1196,13 +1196,34 @@ app.patch("/api/it/ranks", requireAuth, requireRole("IT"), (req, res) => {
 
 app.patch("/api/it/nav-labels", requireAuth, requireRole("IT"), (req, res) => {
   const navLabels = req.body.navLabels && typeof req.body.navLabels === "object" ? req.body.navLabels : {};
-  const before = req.db.settings.navLabels;
-  req.db.settings.navLabels = Object.fromEntries(
-    Object.entries(navLabels).map(([key, value]) => [key, String(value || key).trim()])
-  );
-  logAction(req.db, req.user, "Reiter geändert", "IT", { before, after: req.db.settings.navLabels });
+  const before = {
+    navLabels: req.db.settings.navLabels,
+    departments: req.db.settings.departments.map((department) => ({ id: department.id, name: department.name }))
+  };
+  const nextNavLabels = {};
+  Object.entries(navLabels).forEach(([key, value]) => {
+    const label = String(value || key).trim();
+    if (key.startsWith("dept:")) {
+      const departmentId = key.slice(5);
+      const department = req.db.settings.departments.find((item) => item.id === departmentId);
+      if (department && label) department.name = label;
+      return;
+    }
+    nextNavLabels[key] = label;
+  });
+  req.db.settings.navLabels = nextNavLabels;
+  logAction(req.db, req.user, "Reiter geändert", "IT", {
+    before,
+    after: {
+      navLabels: req.db.settings.navLabels,
+      departments: req.db.settings.departments.map((department) => ({ id: department.id, name: department.name }))
+    }
+  });
   writeDb(req.db);
-  res.json({ navLabels: req.db.settings.navLabels });
+  res.json({
+    navLabels: req.db.settings.navLabels,
+    departments: req.db.settings.departments.map((department) => publicDepartment(department, req.db, req.user))
+  });
 });
 
 app.patch("/api/it/permissions", requireAuth, requireRole("IT"), (req, res) => {

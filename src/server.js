@@ -339,15 +339,33 @@ function defaultDiscordSync() {
     serverId: "",
     botToken: process.env.DISCORD_BOT_TOKEN || "",
     rankRoles: {},
-    departmentRoles: {}
+    departmentRoles: {},
+    importedRoles: []
   };
 }
 
 function normalizeDiscordRoleMap(value) {
   const source = value && typeof value === "object" ? value : {};
   return Object.fromEntries(Object.entries(source)
-    .map(([key, roleId]) => [String(key || "").trim(), String(roleId || "").trim()])
-    .filter(([key, roleId]) => key && roleId));
+    .map(([key, roleIds]) => {
+      const ids = Array.isArray(roleIds) ? roleIds : String(roleIds || "").split(",");
+      return [String(key || "").trim(), [...new Set(ids.map((roleId) => String(roleId || "").trim()).filter(Boolean))]];
+    })
+    .filter(([key, roleIds]) => key && roleIds.length));
+}
+
+function normalizeDiscordImportedRoles(value) {
+  const roles = Array.isArray(value) ? value : [];
+  return roles
+    .map((role) => ({
+      id: String(role.id || "").trim(),
+      name: String(role.name || "").trim(),
+      color: Number(role.color || 0),
+      position: Number(role.position || 0),
+      managed: Boolean(role.managed)
+    }))
+    .filter((role) => role.id && role.name)
+    .sort((a, b) => b.position - a.position || a.name.localeCompare(b.name));
 }
 
 function normalizeDiscordSync(value) {
@@ -359,7 +377,8 @@ function normalizeDiscordSync(value) {
     serverId: String(source.serverId || process.env.DISCORD_SERVER_ID || "").trim(),
     botToken: String(source.botToken || process.env.DISCORD_BOT_TOKEN || "").trim(),
     rankRoles: normalizeDiscordRoleMap(source.rankRoles),
-    departmentRoles: normalizeDiscordRoleMap(source.departmentRoles)
+    departmentRoles: normalizeDiscordRoleMap(source.departmentRoles),
+    importedRoles: normalizeDiscordImportedRoles(source.importedRoles)
   };
 }
 
@@ -432,21 +451,19 @@ function discordRoleIdsForUser(db, user) {
   const sync = normalizeDiscordSync(db.settings?.discordSync);
   const roleIds = new Set();
   if (user.terminated) return roleIds;
-  const rankRole = sync.rankRoles[String(user.rank)];
-  if (rankRole) roleIds.add(rankRole);
+  (sync.rankRoles[String(user.rank)] || []).forEach((roleId) => roleIds.add(roleId));
   (db.settings?.departments || []).forEach((department) => {
     const membership = department.members?.find((member) => member.userId === user.id);
     if (!membership) return;
-    const roleId = sync.departmentRoles[`${department.id}:${membership.position}`];
-    if (roleId) roleIds.add(roleId);
+    (sync.departmentRoles[`${department.id}:${membership.position}`] || []).forEach((roleId) => roleIds.add(roleId));
   });
   return roleIds;
 }
 
 function allConfiguredDiscordRoleIds(sync) {
   return new Set([
-    ...Object.values(sync.rankRoles || {}),
-    ...Object.values(sync.departmentRoles || {})
+    ...Object.values(sync.rankRoles || {}).flat(),
+    ...Object.values(sync.departmentRoles || {}).flat()
   ].filter(Boolean));
 }
 
@@ -484,6 +501,54 @@ function discordApiRequest(method, sync, pathName) {
 
 function requestDiscordRole(method, sync, userId, roleId) {
   return discordApiRequest(method, sync, `/guilds/${encodeURIComponent(sync.serverId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`);
+}
+
+function discordBearerRequest(accessToken, pathName) {
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      hostname: "discord.com",
+      path: `/api/v10${pathName}`,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "User-Agent": "LSPD-Dienstblatt Discord OAuth"
+      }
+    }, (response) => {
+      let body = "";
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          try {
+            return resolve(body ? JSON.parse(body) : {});
+          } catch {
+            return resolve({});
+          }
+        }
+        reject(new Error(`Discord OAuth HTTP ${response.statusCode}`));
+      });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+async function discordUserFromAccessToken(accessToken) {
+  const token = String(accessToken || "").trim();
+  if (!token) throw new Error("Discord Token fehlt.");
+  const user = await discordBearerRequest(token, "/users/@me");
+  if (!user?.id) throw new Error("Discord Benutzer konnte nicht gelesen werden.");
+  return {
+    id: String(user.id),
+    username: String(user.username || ""),
+    globalName: String(user.global_name || user.username || ""),
+    avatar: String(user.avatar || "")
+  };
+}
+
+function createSession(db, user) {
+  const token = crypto.randomBytes(32).toString("hex");
+  db.sessions.push({ token, userId: user.id, createdAt: nowIso() });
+  return token;
 }
 
 function syncDiscordRolesForUser(db, user, reason = "update") {
@@ -904,11 +969,60 @@ app.post("/api/login", (req, res) => {
 
   if (!user) return res.status(401).json({ error: "Login fehlgeschlagen." });
 
-  const token = crypto.randomBytes(32).toString("hex");
-  db.sessions.push({ token, userId: user.id, createdAt: nowIso() });
+  const token = createSession(db, user);
   logAction(db, user, "Login", `${user.firstName} ${user.lastName}`.trim());
   writeDb(db);
   res.json({ token, user: publicUser(user) });
+});
+
+app.get("/api/discord/oauth-config", (req, res) => {
+  const db = readDb();
+  const sync = publicDiscordSync(db.settings.discordSync);
+  res.json({
+    applicationId: sync.applicationId,
+    enabled: Boolean(sync.applicationId)
+  });
+});
+
+app.post("/api/discord/login", async (req, res) => {
+  const db = readDb();
+  try {
+    const discordUser = await discordUserFromAccessToken(req.body.accessToken);
+    const user = db.users.find((item) => !item.locked && !item.terminated && item.discordId === discordUser.id);
+    if (!user) {
+      return res.status(404).json({
+        error: "Discord Account ist noch nicht mit einem Dienstblatt-Account verknuepft.",
+        discordUser
+      });
+    }
+    const token = createSession(db, user);
+    logAction(db, user, "Discord Login", actorName(user), { discordId: discordUser.id, discordName: discordUser.globalName || discordUser.username });
+    writeDb(db);
+    res.json({ token, user: publicUser(user), discordUser });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Discord Login fehlgeschlagen." });
+  }
+});
+
+app.post("/api/discord/link", requireAuth, async (req, res) => {
+  if (req.user.mustChangePassword) {
+    return res.status(403).json({ error: "Bitte aendere zuerst dein Standardpasswort. Danach kannst du Discord verknuepfen." });
+  }
+  try {
+    const discordUser = await discordUserFromAccessToken(req.body.accessToken);
+    const otherUser = req.db.users.find((item) => item.id !== req.user.id && item.discordId === discordUser.id && !item.terminated);
+    if (otherUser) return res.status(400).json({ error: "Dieser Discord Account ist bereits mit einem anderen Dienstblatt-Account verknuepft." });
+    const before = req.user.discordId || "";
+    req.user.discordId = discordUser.id;
+    req.user.discordName = discordUser.globalName || discordUser.username;
+    req.user.updatedAt = nowIso();
+    logAction(req.db, req.user, "Discord verknuepft", actorName(req.user), { before, after: req.user.discordId, discordName: req.user.discordName });
+    writeDb(req.db);
+    syncDiscordRolesForUser(req.db, req.user, "Discord verknuepft");
+    res.json({ user: publicUser(req.user), discordUser });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Discord Verknuepfung fehlgeschlagen." });
+  }
 });
 
 app.post("/api/logout", requireAuth, (req, res) => {
@@ -1564,6 +1678,7 @@ app.patch("/api/it/discord-sync", requireAuth, requireRole("IT"), (req, res) => 
   const clearBotToken = Boolean(incoming.clearBotToken);
   const next = normalizeDiscordSync({
     ...incoming,
+    importedRoles: current.importedRoles,
     botToken: clearBotToken ? "" : String(incoming.botToken || "").trim() || current.botToken
   });
   const before = publicDiscordSync(current);
@@ -1571,6 +1686,21 @@ app.patch("/api/it/discord-sync", requireAuth, requireRole("IT"), (req, res) => 
   logAction(req.db, req.user, "Discord Sync geaendert", "IT", { before, after: publicDiscordSync(next) });
   writeDb(req.db);
   res.json({ settings: publicSettings(req.db.settings) });
+});
+
+app.post("/api/it/discord-sync/import-roles", requireAuth, requireRole("IT"), async (req, res) => {
+  const sync = normalizeDiscordSync(req.db.settings.discordSync);
+  if (!sync.serverId || !sync.botToken) return res.status(400).json({ error: "Server ID und Bot Token muessen hinterlegt sein." });
+  try {
+    const roles = await discordApiRequest("GET", sync, `/guilds/${encodeURIComponent(sync.serverId)}/roles`);
+    const importedRoles = normalizeDiscordImportedRoles((Array.isArray(roles) ? roles : []).filter((role) => role.name !== "@everyone"));
+    req.db.settings.discordSync = normalizeDiscordSync({ ...sync, importedRoles });
+    logAction(req.db, req.user, "Discord Rollen importiert", "IT", { roles: importedRoles.length });
+    writeDb(req.db);
+    res.json({ settings: publicSettings(req.db.settings), roles: importedRoles });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Discord Rollen konnten nicht importiert werden." });
+  }
 });
 
 app.post("/api/it/discord-sync/run", requireAuth, requireRole("IT"), (req, res) => {

@@ -4308,6 +4308,20 @@ table td.text-left {
   font-size: 13px;
 }
 
+.discord-role-row select[multiple] {
+  min-height: 96px;
+}
+
+.discord-import-status {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(99, 168, 255, .24);
+  border-radius: 8px;
+  background: rgba(40, 119, 255, .1);
+  color: #cfe1fb;
+  font-size: 12px;
+}
+
 .switch-line {
   display: flex;
   align-items: center;
@@ -4319,6 +4333,39 @@ table td.text-left {
 .switch-line input {
   width: auto;
   accent-color: #2877ff;
+}
+
+.discord-login-btn {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(88, 101, 242, .55);
+  border-radius: 8px;
+  background: #5865f2;
+  color: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.discord-login-btn:hover {
+  filter: brightness(1.08);
+}
+
+.discord-profile-btn {
+  background: #5865f2;
+  color: #ffffff;
+  border: 1px solid rgba(88, 101, 242, .55);
+}
+
+.profile-discord-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.profile-discord-card h3,
+.profile-discord-card p {
+  margin: 0;
 }
 
 .it-password-panel {
@@ -7231,7 +7278,8 @@ table td.text-left {
   .it-overview-grid,
   .it-overview-restarts,
   .discord-sync-layout,
-  .discord-role-row {
+  .discord-role-row,
+  .profile-discord-card {
     grid-template-columns: 1fr;
   }
 

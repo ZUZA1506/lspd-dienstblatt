@@ -81,6 +81,8 @@ const state = {
   departmentTabs: JSON.parse(localStorage.getItem("lspd_department_tabs") || "{}")
 };
 
+const DISCORD_PENDING_TOKEN_KEY = "lspd_pending_discord_token";
+
 const pages = [
   "Dienstblatt",
   "Einsatzzentrale",
@@ -513,6 +515,86 @@ async function api(path, options = {}) {
   }
   if (shouldNotify) showNotify(successMessage(path, method), "success");
   return data;
+}
+
+async function startDiscordOAuth(mode = "login") {
+  const targetError = $("#loginError");
+  try {
+    const config = await api("/api/discord/oauth-config", { silent: true });
+    if (!config.applicationId) throw new Error("Discord Login ist noch nicht eingerichtet.");
+    const oauthState = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    sessionStorage.setItem("lspd_discord_oauth_state", JSON.stringify({ state: oauthState, mode }));
+    const redirectUri = `${window.location.origin}${window.location.pathname}`;
+    const params = new URLSearchParams({
+      client_id: config.applicationId,
+      redirect_uri: redirectUri,
+      response_type: "token",
+      scope: "identify",
+      state: oauthState,
+      prompt: "consent"
+    });
+    window.location.href = `https://discord.com/oauth2/authorize?${params.toString()}`;
+  } catch (error) {
+    if (targetError) targetError.textContent = error.message;
+    else showNotify(error.message, "error");
+  }
+}
+
+async function completeDiscordOAuth(accessToken, mode) {
+  if (mode === "link" || state.token) {
+    if (!state.token) {
+      sessionStorage.setItem(DISCORD_PENDING_TOKEN_KEY, accessToken);
+      showLogin();
+      $("#loginError").textContent = "Discord erkannt. Bitte melde dich zuerst normal an. Nach dem Passwortwechsel kannst du Discord im Profil verknüpfen.";
+      return;
+    }
+    const data = await api("/api/discord/link", { method: "POST", body: JSON.stringify({ accessToken }) });
+    state.currentUser = data.user || state.currentUser;
+    await bootstrap();
+    showNotify(`Discord verknüpft: ${data.discordUser?.globalName || data.discordUser?.username || "Account"}`);
+    return;
+  }
+  try {
+    const data = await api("/api/discord/login", { method: "POST", body: JSON.stringify({ accessToken }) });
+    state.token = data.token;
+    storeAuthToken(state.token);
+    await bootstrap();
+  } catch (error) {
+    sessionStorage.setItem(DISCORD_PENDING_TOKEN_KEY, accessToken);
+    showLogin();
+    $("#loginError").textContent = "Discord ist noch nicht verknüpft. Melde dich zuerst normal an und verknüpfe Discord danach im Profil.";
+  }
+}
+
+async function handleDiscordOAuthRedirect() {
+  if (!window.location.hash.includes("access_token=")) return false;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const accessToken = params.get("access_token") || "";
+  const returnedState = params.get("state") || "";
+  const stored = JSON.parse(sessionStorage.getItem("lspd_discord_oauth_state") || "{}");
+  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+  if (!accessToken || !stored.state || returnedState !== stored.state) {
+    showLogin();
+    $("#loginError").textContent = "Discord Login konnte nicht geprüft werden.";
+    return true;
+  }
+  sessionStorage.removeItem("lspd_discord_oauth_state");
+  await completeDiscordOAuth(accessToken, stored.mode || "login");
+  return true;
+}
+
+async function linkPendingDiscordAccount() {
+  const accessToken = sessionStorage.getItem(DISCORD_PENDING_TOKEN_KEY);
+  if (!accessToken || !state.token) return;
+  if (state.currentUser?.mustChangePassword) return;
+  try {
+    const data = await api("/api/discord/link", { method: "POST", body: JSON.stringify({ accessToken }) });
+    sessionStorage.removeItem(DISCORD_PENDING_TOKEN_KEY);
+    state.currentUser = data.user || state.currentUser;
+    showNotify(`Discord verknüpft: ${data.discordUser?.globalName || data.discordUser?.username || "Account"}`);
+  } catch (error) {
+    $("#loginError").textContent = error.message;
+  }
 }
 
 function successMessage(path, method) {
@@ -2287,10 +2369,25 @@ function renderITDepartmentPositionsPanel() {
   `;
 }
 
+function discordRoleOptions(selectedRoleIds = []) {
+  const roles = state.settings?.discordSync?.importedRoles || [];
+  const selected = new Set(Array.isArray(selectedRoleIds) ? selectedRoleIds.map(String) : String(selectedRoleIds || "").split(",").map((item) => item.trim()));
+  return roles.map((role) => `<option value="${escapeHtml(role.id)}" ${selected.has(String(role.id)) ? "selected" : ""}>${escapeHtml(role.name)}</option>`).join("");
+}
+
+function renderDiscordRoleSelect(attribute, key, selectedRoleIds) {
+  const roles = state.settings?.discordSync?.importedRoles || [];
+  if (!roles.length) {
+    return `<select ${attribute}="${escapeHtml(key)}" multiple disabled><option>Bitte zuerst Server-Rollen importieren</option></select>`;
+  }
+  return `<select ${attribute}="${escapeHtml(key)}" multiple>${discordRoleOptions(selectedRoleIds)}</select>`;
+}
+
 function renderDiscordSyncPanel() {
   const sync = state.settings?.discordSync || {};
   const rankRoles = sync.rankRoles || {};
   const departmentRoles = sync.departmentRoles || {};
+  const importedRoles = sync.importedRoles || [];
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
   const orderedDepartmentKeys = orderPages((state.departments || []).map((department) => `dept:${department.id}`));
   const departments = orderedDepartmentKeys
@@ -2301,6 +2398,8 @@ function renderDiscordSyncPanel() {
       <div class="it-section-title">
         <div><h3>Discord Sync</h3><p class="muted">Rang- und Abteilungsrollen vorbereiten, damit Discord-Rollen passend zum Dienstblatt vergeben werden koennen.</p></div>
         <div class="button-row">
+          <button class="ghost-btn" id="linkOwnDiscord" type="button">Meinen Discord verknüpfen</button>
+          <button class="ghost-btn" id="importDiscordRoles" type="button">Server-Rollen importieren</button>
           <button class="ghost-btn" id="testDiscordSync" type="button">Verbindung testen</button>
           <button class="ghost-btn" id="runDiscordSync" type="button">Jetzt synchronisieren</button>
           <button class="blue-btn" id="saveDiscordSync" type="button">Discord Sync speichern</button>
@@ -2310,19 +2409,20 @@ function renderDiscordSyncPanel() {
         <div class="discord-sync-config">
           <label class="switch-line"><input id="discordSyncEnabled" type="checkbox" ${sync.enabled ? "checked" : ""}><span>Discord Sync aktivieren</span></label>
           <label>Anwendungs-ID<input id="discordApplicationId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.applicationId || "")}" placeholder="Discord Anwendungs-ID"></label>
-          <label>Oeffentlicher Schluessel<input id="discordPublicKey" autocomplete="off" value="${escapeHtml(sync.publicKey || "")}" placeholder="Discord Public Key"></label>
+          <label>Öffentlicher Schlüssel<input id="discordPublicKey" autocomplete="off" value="${escapeHtml(sync.publicKey || "")}" placeholder="Discord Public Key"></label>
           <label>Server ID<input id="discordServerId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.serverId || "")}" placeholder="Discord Server ID"></label>
           <label>Bot Token<input id="discordBotToken" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="${sync.botTokenSet ? "Token ist gespeichert - leer lassen zum Behalten" : "Bot Token eintragen"}"></label>
           <label class="switch-line"><input id="clearDiscordBotToken" type="checkbox"><span>Gespeicherten Bot Token entfernen</span></label>
-          <p class="muted">Fuer Rollen-Sync muss in der Discord Application ein Bot-User existieren und mit bot-Scope auf dem Server sein. Der Bot braucht Rollen verwalten und seine hoechste Rolle muss ueber den Rollen liegen, die hier vergeben werden sollen.</p>
+          <p class="muted">Für Rollen-Sync muss in der Discord Application ein Bot-User existieren und mit bot-Scope auf dem Server sein. Der Bot braucht Rollen verwalten und seine höchste Rolle muss über den Rollen liegen, die hier vergeben werden sollen.</p>
+          <p class="discord-import-status">${importedRoles.length ? `${importedRoles.length} Server-Rollen importiert.` : "Noch keine Server-Rollen importiert."}</p>
         </div>
         <div class="discord-sync-section">
-          <div><strong>Raenge</strong><small>Jeder Dienstblatt-Rang kann genau eine Discord-Rolle bekommen.</small></div>
+          <div><strong>Ränge</strong><small>Jeder Dienstblatt-Rang kann mehrere Discord-Rollen bekommen.</small></div>
           <div class="discord-role-grid">
             ${sortedRanks.map((rank) => `
               <label class="discord-role-row">
                 <span>${escapeHtml(rankOptionLabel(rank))}</span>
-                <input data-discord-rank-role="${rank.value}" inputmode="numeric" autocomplete="off" value="${escapeHtml(rankRoles[String(rank.value)] || "")}" placeholder="Discord Rollen-ID">
+                ${renderDiscordRoleSelect("data-discord-rank-role", rank.value, rankRoles[String(rank.value)] || [])}
               </label>
             `).join("")}
           </div>
@@ -2339,7 +2439,7 @@ function renderDiscordSyncPanel() {
                     return `
                       <label class="discord-role-row">
                         <span>${escapeHtml(position)}</span>
-                        <input data-discord-dept-role="${escapeHtml(key)}" inputmode="numeric" autocomplete="off" value="${escapeHtml(departmentRoles[key] || "")}" placeholder="Discord Rollen-ID">
+                        ${renderDiscordRoleSelect("data-discord-dept-role", key, departmentRoles[key] || [])}
                       </label>
                     `;
                   }).join("")}
@@ -2516,8 +2616,10 @@ function renderIT() {
   $("#itCreateMember")?.addEventListener("click", () => openUserModal());
   $("#saveDefaultCredential")?.addEventListener("click", saveDefaultPassword);
   $("#saveDiscordSync")?.addEventListener("click", saveDiscordSyncSettings);
+  $("#importDiscordRoles")?.addEventListener("click", importDiscordRoles);
   $("#testDiscordSync")?.addEventListener("click", testDiscordSync);
   $("#runDiscordSync")?.addEventListener("click", runDiscordSync);
+  $("#linkOwnDiscord")?.addEventListener("click", () => startDiscordOAuth("link"));
   document.querySelectorAll(".it-edit-member").forEach((button) => button.addEventListener("click", () => openUserModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".reset-member-password").forEach((button) => button.addEventListener("click", () => openResetPasswordModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".page-permission-open").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
@@ -2623,14 +2725,14 @@ async function saveDiscordSyncSettings(options = {}) {
   const rethrow = Boolean(options.rethrow);
   const message = $("#discordSyncMessage");
   const rankRoles = {};
-  document.querySelectorAll("[data-discord-rank-role]").forEach((input) => {
-    const roleId = input.value.trim();
-    if (roleId) rankRoles[input.dataset.discordRankRole] = roleId;
+  document.querySelectorAll("[data-discord-rank-role]").forEach((select) => {
+    const roleIds = Array.from(select.selectedOptions || []).map((option) => option.value.trim()).filter(Boolean);
+    if (roleIds.length) rankRoles[select.dataset.discordRankRole] = roleIds;
   });
   const departmentRoles = {};
-  document.querySelectorAll("[data-discord-dept-role]").forEach((input) => {
-    const roleId = input.value.trim();
-    if (roleId) departmentRoles[input.dataset.discordDeptRole] = roleId;
+  document.querySelectorAll("[data-discord-dept-role]").forEach((select) => {
+    const roleIds = Array.from(select.selectedOptions || []).map((option) => option.value.trim()).filter(Boolean);
+    if (roleIds.length) departmentRoles[select.dataset.discordDeptRole] = roleIds;
   });
   const discordSync = {
     enabled: $("#discordSyncEnabled")?.checked || false,
@@ -2653,6 +2755,22 @@ async function saveDiscordSyncSettings(options = {}) {
       message.className = "form-error";
     }
     if (rethrow) throw error;
+  }
+}
+
+async function importDiscordRoles() {
+  const message = $("#discordSyncMessage");
+  try {
+    await saveDiscordSyncSettings({ skipNotify: true, rethrow: true });
+    const data = await api("/api/it/discord-sync/import-roles", { method: "POST", body: "{}" });
+    state.settings = data.settings || state.settings;
+    renderIT();
+    showNotify(`${data.roles?.length || 0} Discord Rollen importiert.`);
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-error";
+    }
   }
 }
 
@@ -7267,9 +7385,17 @@ function renderProfile() {
       </div>
       <div class="profile-actions">
         <button class="orange-btn action-btn" id="openPasswordModal">${iconSvg("IT")} Passwort ändern</button>
+        <button class="discord-profile-btn action-btn" id="profileDiscordLink">${iconSvg("IT")} ${user.discordId ? "Discord neu verknüpfen" : "Discord verknüpfen"}</button>
         <button class="blue-btn action-btn" id="avatarPickBtn">${iconSvg("Profil")} Avatar ändern</button>
         <input id="avatarFileInput" class="hidden" type="file" accept="image/*">
       </div>
+    </section>
+    <section class="panel profile-discord-card">
+      <div>
+        <h3>Discord Sync</h3>
+        <p class="muted">${user.discordId ? `Verknüpft mit Discord ID ${escapeHtml(user.discordId)}${user.discordName ? ` (${escapeHtml(user.discordName)})` : ""}.` : "Noch kein Discord Account verknüpft. Nach der Verknüpfung kann Discord Login und Rollen-Sync genutzt werden."}</p>
+      </div>
+      <button class="discord-login-btn" id="profileDiscordLinkSecondary" type="button">${user.discordId ? "Discord Verbindung erneuern" : "Discord jetzt verknüpfen"}</button>
     </section>
     <section class="grid-4 profile-stat-grid">
       <div class="stat-card progress-stat">
@@ -7322,6 +7448,8 @@ function renderProfile() {
     });
   });
   $("#openPasswordModal").addEventListener("click", openPasswordModal);
+  $("#profileDiscordLink")?.addEventListener("click", () => startDiscordOAuth("link"));
+  $("#profileDiscordLinkSecondary")?.addEventListener("click", () => startDiscordOAuth("link"));
   $("#avatarPickBtn").addEventListener("click", () => $("#avatarFileInput").click());
   $("#avatarFileInput").addEventListener("change", uploadAvatarFile);
 }
@@ -9389,10 +9517,13 @@ $("#loginForm").addEventListener("submit", async (event) => {
     state.token = data.token;
     storeAuthToken(state.token);
     await bootstrap();
+    await linkPendingDiscordAccount();
   } catch (error) {
     $("#loginError").textContent = error.message;
   }
 });
+
+$("#discordLoginBtn")?.addEventListener("click", () => startDiscordOAuth("login"));
 
 async function logout() {
   try {
@@ -9415,11 +9546,17 @@ document.addEventListener("click", (event) => {
   });
 });
 
-if (state.token) {
-  bootstrap().catch(() => {
-    clearAuthToken();
+async function initApp() {
+  const handledDiscordRedirect = await handleDiscordOAuthRedirect();
+  if (handledDiscordRedirect) return;
+  if (state.token) {
+    bootstrap().catch(() => {
+      clearAuthToken();
+      showLogin();
+    });
+  } else {
     showLogin();
-  });
-} else {
-  showLogin();
+  }
 }
+
+initApp();

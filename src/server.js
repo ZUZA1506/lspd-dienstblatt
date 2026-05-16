@@ -336,6 +336,7 @@ function defaultDiscordSync() {
     enabled: false,
     applicationId: process.env.DISCORD_APPLICATION_ID || "",
     publicKey: process.env.DISCORD_PUBLIC_KEY || "",
+    oauthRedirectUrl: process.env.DISCORD_OAUTH_REDIRECT_URL || "",
     serverId: "",
     botToken: process.env.DISCORD_BOT_TOKEN || "",
     rankRoles: {},
@@ -374,6 +375,7 @@ function normalizeDiscordSync(value) {
     enabled: Boolean(source.enabled),
     applicationId: String(source.applicationId || process.env.DISCORD_APPLICATION_ID || "").trim(),
     publicKey: String(source.publicKey || process.env.DISCORD_PUBLIC_KEY || "").trim(),
+    oauthRedirectUrl: String(source.oauthRedirectUrl || process.env.DISCORD_OAUTH_REDIRECT_URL || "").trim(),
     serverId: String(source.serverId || process.env.DISCORD_SERVER_ID || "").trim(),
     botToken: String(source.botToken || process.env.DISCORD_BOT_TOKEN || "").trim(),
     rankRoles: normalizeDiscordRoleMap(source.rankRoles),
@@ -980,6 +982,7 @@ app.get("/api/discord/oauth-config", (req, res) => {
   const sync = publicDiscordSync(db.settings.discordSync);
   res.json({
     applicationId: sync.applicationId,
+    oauthRedirectUrl: sync.oauthRedirectUrl,
     enabled: Boolean(sync.applicationId)
   });
 });

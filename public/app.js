@@ -524,7 +524,7 @@ async function startDiscordOAuth(mode = "login") {
     if (!config.applicationId) throw new Error("Discord Login ist noch nicht eingerichtet.");
     const oauthState = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
     sessionStorage.setItem("lspd_discord_oauth_state", JSON.stringify({ state: oauthState, mode }));
-    const redirectUri = `${window.location.origin}${window.location.pathname}`;
+    const redirectUri = config.oauthRedirectUrl || `${window.location.origin}/`;
     const params = new URLSearchParams({
       client_id: config.applicationId,
       redirect_uri: redirectUri,
@@ -2410,6 +2410,7 @@ function renderDiscordSyncPanel() {
           <label class="switch-line"><input id="discordSyncEnabled" type="checkbox" ${sync.enabled ? "checked" : ""}><span>Discord Sync aktivieren</span></label>
           <label>Anwendungs-ID<input id="discordApplicationId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.applicationId || "")}" placeholder="Discord Anwendungs-ID"></label>
           <label>Öffentlicher Schlüssel<input id="discordPublicKey" autocomplete="off" value="${escapeHtml(sync.publicKey || "")}" placeholder="Discord Public Key"></label>
+          <label>OAuth Redirect URL<input id="discordOauthRedirectUrl" autocomplete="off" value="${escapeHtml(sync.oauthRedirectUrl || `${window.location.origin}/`)}" placeholder="Exakt wie im Discord Developer Portal"></label>
           <label>Server ID<input id="discordServerId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.serverId || "")}" placeholder="Discord Server ID"></label>
           <label>Bot Token<input id="discordBotToken" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="${sync.botTokenSet ? "Token ist gespeichert - leer lassen zum Behalten" : "Bot Token eintragen"}"></label>
           <label class="switch-line"><input id="clearDiscordBotToken" type="checkbox"><span>Gespeicherten Bot Token entfernen</span></label>
@@ -2738,6 +2739,7 @@ async function saveDiscordSyncSettings(options = {}) {
     enabled: $("#discordSyncEnabled")?.checked || false,
     applicationId: $("#discordApplicationId")?.value.trim() || "",
     publicKey: $("#discordPublicKey")?.value.trim() || "",
+    oauthRedirectUrl: $("#discordOauthRedirectUrl")?.value.trim() || "",
     serverId: $("#discordServerId")?.value.trim() || "",
     botToken: $("#discordBotToken")?.value.trim() || "",
     clearBotToken: $("#clearDiscordBotToken")?.checked || false,
@@ -7385,7 +7387,6 @@ function renderProfile() {
       </div>
       <div class="profile-actions">
         <button class="orange-btn action-btn" id="openPasswordModal">${iconSvg("IT")} Passwort ändern</button>
-        <button class="discord-profile-btn action-btn" id="profileDiscordLink">${iconSvg("IT")} ${user.discordId ? "Discord neu verknüpfen" : "Discord verknüpfen"}</button>
         <button class="blue-btn action-btn" id="avatarPickBtn">${iconSvg("Profil")} Avatar ändern</button>
         <input id="avatarFileInput" class="hidden" type="file" accept="image/*">
       </div>
@@ -7448,7 +7449,6 @@ function renderProfile() {
     });
   });
   $("#openPasswordModal").addEventListener("click", openPasswordModal);
-  $("#profileDiscordLink")?.addEventListener("click", () => startDiscordOAuth("link"));
   $("#profileDiscordLinkSecondary")?.addEventListener("click", () => startDiscordOAuth("link"));
   $("#avatarPickBtn").addEventListener("click", () => $("#avatarFileInput").click());
   $("#avatarFileInput").addEventListener("change", uploadAvatarFile);

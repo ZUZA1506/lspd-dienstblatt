@@ -4338,22 +4338,17 @@ table td.text-left {
 .discord-login-btn {
   width: 100%;
   min-height: 46px;
-  border: 1px solid rgba(88, 101, 242, .55);
+  border: 1px solid rgba(128, 139, 255, .5);
   border-radius: 8px;
-  background: #5865f2;
+  background: linear-gradient(135deg, #5865f2, #4652c8);
   color: #ffffff;
   font-weight: 900;
   cursor: pointer;
+  box-shadow: 0 10px 24px rgba(88, 101, 242, .22);
 }
 
 .discord-login-btn:hover {
   filter: brightness(1.08);
-}
-
-.discord-profile-btn {
-  background: #5865f2;
-  color: #ffffff;
-  border: 1px solid rgba(88, 101, 242, .55);
 }
 
 .profile-discord-card {
@@ -7120,6 +7115,19 @@ table td.text-left {
   margin: 0 0 6px;
   color: #f8fbff;
   font-size: 30px;
+}
+
+.login-panel .primary-btn,
+.login-panel .discord-login-btn {
+  min-height: 48px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.login-panel .primary-btn {
+  margin-top: 2px;
+  background: linear-gradient(135deg, #2f6df6, #1749b7);
+  box-shadow: 0 12px 26px rgba(47, 109, 246, .24);
 }
 
 .login-panel footer {

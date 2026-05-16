@@ -2292,7 +2292,10 @@ function renderDiscordSyncPanel() {
   const rankRoles = sync.rankRoles || {};
   const departmentRoles = sync.departmentRoles || {};
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
-  const departments = [...(state.departments || [])].sort((a, b) => (pageOrderIndex(`dept:${a.id}`) - pageOrderIndex(`dept:${b.id}`)) || a.name.localeCompare(b.name));
+  const orderedDepartmentKeys = orderPages((state.departments || []).map((department) => `dept:${department.id}`));
+  const departments = orderedDepartmentKeys
+    .map((key) => (state.departments || []).find((department) => `dept:${department.id}` === key))
+    .filter(Boolean);
   return `
     <div class="panel it-section-card it-discord-card">
       <div class="it-section-title">
@@ -2311,7 +2314,7 @@ function renderDiscordSyncPanel() {
           <label>Server ID<input id="discordServerId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.serverId || "")}" placeholder="Discord Server ID"></label>
           <label>Bot Token<input id="discordBotToken" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="${sync.botTokenSet ? "Token ist gespeichert - leer lassen zum Behalten" : "Bot Token eintragen"}"></label>
           <label class="switch-line"><input id="clearDiscordBotToken" type="checkbox"><span>Gespeicherten Bot Token entfernen</span></label>
-          <p class="muted">Der Bot braucht auf dem Discord Server die Berechtigung Rollen zu verwalten. Seine hoechste Rolle muss ueber den Rollen liegen, die hier vergeben werden sollen.</p>
+          <p class="muted">Fuer Rollen-Sync muss in der Discord Application ein Bot-User existieren und mit bot-Scope auf dem Server sein. Der Bot braucht Rollen verwalten und seine hoechste Rolle muss ueber den Rollen liegen, die hier vergeben werden sollen.</p>
         </div>
         <div class="discord-sync-section">
           <div><strong>Raenge</strong><small>Jeder Dienstblatt-Rang kann genau eine Discord-Rolle bekommen.</small></div>

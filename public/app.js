@@ -2058,7 +2058,7 @@ function departmentActionAllowed(department, action) {
   if (!rule && action === "departmentLeadership") {
     if (hasRole("Direktion")) return true;
     const membership = department.members.find((member) => member.userId === state.currentUser?.id);
-    return positionPowerFor(department, membership?.position) >= positionPowerFor(department, "Leitung");
+    return departmentLeaderPositionsFor(department).includes(membership?.position);
   }
   return rule ? canAccess("actions", key, "IT") : Boolean(department.canManage);
 }
@@ -2073,6 +2073,19 @@ function departmentLeaderPositionsFor(department) {
   const fallback = positions.filter((position) => ["Direktion", "Leitung", "Stv. Leitung"].includes(position));
   const leaders = Array.isArray(department?.leaderPositions) ? department.leaderPositions.filter((position) => positions.includes(position)) : fallback;
   return [...new Set(leaders.length ? leaders : fallback)];
+}
+
+function defaultPositionColor(position) {
+  if (position === "Direktion" || position === "Anwärter") return "green";
+  if (position === "Leitung") return "red";
+  if (position === "Stv. Leitung") return "orange";
+  if (position === "Mitglied") return "blue";
+  return "blue";
+}
+
+function positionColorFor(department, position) {
+  const color = department?.positionColors?.[position] || defaultPositionColor(position);
+  return ["green", "red", "orange", "blue"].includes(color) ? color : defaultPositionColor(position);
 }
 
 function positionPowerFor(department, position) {
@@ -2274,6 +2287,70 @@ function renderITDepartmentPositionsPanel() {
   `;
 }
 
+function renderDiscordSyncPanel() {
+  const sync = state.settings?.discordSync || {};
+  const rankRoles = sync.rankRoles || {};
+  const departmentRoles = sync.departmentRoles || {};
+  const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
+  const departments = [...(state.departments || [])].sort((a, b) => (pageOrderIndex(`dept:${a.id}`) - pageOrderIndex(`dept:${b.id}`)) || a.name.localeCompare(b.name));
+  return `
+    <div class="panel it-section-card it-discord-card">
+      <div class="it-section-title">
+        <div><h3>Discord Sync</h3><p class="muted">Rang- und Abteilungsrollen vorbereiten, damit Discord-Rollen passend zum Dienstblatt vergeben werden koennen.</p></div>
+        <div class="button-row">
+          <button class="ghost-btn" id="testDiscordSync" type="button">Verbindung testen</button>
+          <button class="ghost-btn" id="runDiscordSync" type="button">Jetzt synchronisieren</button>
+          <button class="blue-btn" id="saveDiscordSync" type="button">Discord Sync speichern</button>
+        </div>
+      </div>
+      <div class="discord-sync-layout">
+        <div class="discord-sync-config">
+          <label class="switch-line"><input id="discordSyncEnabled" type="checkbox" ${sync.enabled ? "checked" : ""}><span>Discord Sync aktivieren</span></label>
+          <label>Anwendungs-ID<input id="discordApplicationId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.applicationId || "")}" placeholder="Discord Anwendungs-ID"></label>
+          <label>Oeffentlicher Schluessel<input id="discordPublicKey" autocomplete="off" value="${escapeHtml(sync.publicKey || "")}" placeholder="Discord Public Key"></label>
+          <label>Server ID<input id="discordServerId" inputmode="numeric" autocomplete="off" value="${escapeHtml(sync.serverId || "")}" placeholder="Discord Server ID"></label>
+          <label>Bot Token<input id="discordBotToken" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="${sync.botTokenSet ? "Token ist gespeichert - leer lassen zum Behalten" : "Bot Token eintragen"}"></label>
+          <label class="switch-line"><input id="clearDiscordBotToken" type="checkbox"><span>Gespeicherten Bot Token entfernen</span></label>
+          <p class="muted">Der Bot braucht auf dem Discord Server die Berechtigung Rollen zu verwalten. Seine hoechste Rolle muss ueber den Rollen liegen, die hier vergeben werden sollen.</p>
+        </div>
+        <div class="discord-sync-section">
+          <div><strong>Raenge</strong><small>Jeder Dienstblatt-Rang kann genau eine Discord-Rolle bekommen.</small></div>
+          <div class="discord-role-grid">
+            ${sortedRanks.map((rank) => `
+              <label class="discord-role-row">
+                <span>${escapeHtml(rankOptionLabel(rank))}</span>
+                <input data-discord-rank-role="${rank.value}" inputmode="numeric" autocomplete="off" value="${escapeHtml(rankRoles[String(rank.value)] || "")}" placeholder="Discord Rollen-ID">
+              </label>
+            `).join("")}
+          </div>
+        </div>
+        <div class="discord-sync-section">
+          <div><strong>Abteilungsrollen</strong><small>Pro Abteilung und interner Position kann eine Discord-Rolle hinterlegt werden.</small></div>
+          <div class="discord-department-list">
+            ${departments.map((department) => `
+              <article class="discord-department-card">
+                <div><strong>${escapeHtml(department.name)}</strong><small>${departmentPositionsFor(department).length} Positionen</small></div>
+                <div class="discord-role-grid">
+                  ${departmentPositionsFor(department).map((position) => {
+                    const key = `${department.id}:${position}`;
+                    return `
+                      <label class="discord-role-row">
+                        <span>${escapeHtml(position)}</span>
+                        <input data-discord-dept-role="${escapeHtml(key)}" inputmode="numeric" autocomplete="off" value="${escapeHtml(departmentRoles[key] || "")}" placeholder="Discord Rollen-ID">
+                      </label>
+                    `;
+                  }).join("")}
+                </div>
+              </article>
+            `).join("") || `<p class="muted">Keine Abteilungen vorhanden.</p>`}
+          </div>
+        </div>
+      </div>
+      <p id="discordSyncMessage" class="muted"></p>
+    </div>
+  `;
+}
+
 function renderIT() {
   if (!hasRole("IT")) {
     content.innerHTML = `<section class="panel"><h3>Kein Zugriff</h3><p class="muted">Dieser Bereich ist nur für IT sichtbar.</p></section>`;
@@ -2283,7 +2360,7 @@ function renderIT() {
   const editablePages = editableItPages();
   const sortedRanks = [...state.ranks].sort((a, b) => b.value - a.value);
   const storedItTab = localStorage.getItem("lspd_it_tab") || "overview";
-  const itTabs = [["overview", "Übersicht"], ["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"]];
+  const itTabs = [["overview", "Übersicht"], ["pages", "Reiter"], ["members", "Mitglieder"], ["ranks", "Ränge"], ["discord", "Discord Sync"]];
   const visibleItTabs = itTabs;
   const itTab = visibleItTabs.some(([id]) => id === storedItTab) ? storedItTab : "overview";
   content.innerHTML = `
@@ -2378,6 +2455,7 @@ function renderIT() {
         </div>
         <p id="rankSaveMessage" class="muted"></p>
       </div>
+      ${itTab === "discord" ? renderDiscordSyncPanel() : ""}
     </section>
 
   `;
@@ -2434,6 +2512,9 @@ function renderIT() {
   $("#removeRank")?.addEventListener("click", openRemoveRankModal);
   $("#itCreateMember")?.addEventListener("click", () => openUserModal());
   $("#saveDefaultCredential")?.addEventListener("click", saveDefaultPassword);
+  $("#saveDiscordSync")?.addEventListener("click", saveDiscordSyncSettings);
+  $("#testDiscordSync")?.addEventListener("click", testDiscordSync);
+  $("#runDiscordSync")?.addEventListener("click", runDiscordSync);
   document.querySelectorAll(".it-edit-member").forEach((button) => button.addEventListener("click", () => openUserModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".reset-member-password").forEach((button) => button.addEventListener("click", () => openResetPasswordModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".page-permission-open").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
@@ -2526,6 +2607,72 @@ async function saveDefaultPassword() {
       message.textContent = "Standardpasswort gespeichert. Neue Accounts und Resets nutzen es ab jetzt.";
       message.className = "muted";
     }
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-error";
+    }
+  }
+}
+
+async function saveDiscordSyncSettings(options = {}) {
+  const skipNotify = Boolean(options.skipNotify);
+  const rethrow = Boolean(options.rethrow);
+  const message = $("#discordSyncMessage");
+  const rankRoles = {};
+  document.querySelectorAll("[data-discord-rank-role]").forEach((input) => {
+    const roleId = input.value.trim();
+    if (roleId) rankRoles[input.dataset.discordRankRole] = roleId;
+  });
+  const departmentRoles = {};
+  document.querySelectorAll("[data-discord-dept-role]").forEach((input) => {
+    const roleId = input.value.trim();
+    if (roleId) departmentRoles[input.dataset.discordDeptRole] = roleId;
+  });
+  const discordSync = {
+    enabled: $("#discordSyncEnabled")?.checked || false,
+    applicationId: $("#discordApplicationId")?.value.trim() || "",
+    publicKey: $("#discordPublicKey")?.value.trim() || "",
+    serverId: $("#discordServerId")?.value.trim() || "",
+    botToken: $("#discordBotToken")?.value.trim() || "",
+    clearBotToken: $("#clearDiscordBotToken")?.checked || false,
+    rankRoles,
+    departmentRoles
+  };
+  try {
+    const data = await api("/api/it/discord-sync", { method: "PATCH", body: JSON.stringify({ discordSync }) });
+    state.settings = data.settings || state.settings;
+    renderIT();
+    if (!skipNotify) showNotify("Discord Sync gespeichert.");
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-error";
+    }
+    if (rethrow) throw error;
+  }
+}
+
+async function testDiscordSync() {
+  const message = $("#discordSyncMessage");
+  try {
+    await saveDiscordSyncSettings({ skipNotify: true, rethrow: true });
+    const data = await api("/api/it/discord-sync/test", { method: "POST", body: "{}" });
+    const guildText = data.guildName ? ` / Server: ${data.guildName}` : "";
+    showNotify(`Discord Verbindung OK: ${data.botName || "Bot"}${guildText}`);
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message;
+      message.className = "form-error";
+    }
+  }
+}
+
+async function runDiscordSync() {
+  const message = $("#discordSyncMessage");
+  try {
+    const data = await api("/api/it/discord-sync/run", { method: "POST", body: "{}" });
+    showNotify(`Discord Sync fuer ${data.synced || 0} Accounts gestartet.`);
   } catch (error) {
     if (message) {
       message.textContent = error.message;
@@ -2711,6 +2858,7 @@ function pagePermissionActions(page) {
 function renderDepartmentPositionManager(department) {
   if (!department) return "";
   const leaderPositions = departmentLeaderPositionsFor(department);
+  const colorOptions = [["green", "Grün"], ["red", "Rot"], ["orange", "Orange"], ["blue", "Blau"]];
   return `
     <section class="department-position-manager">
       <div class="permission-row-head">
@@ -2725,6 +2873,9 @@ function renderDepartmentPositionManager(department) {
           <label class="department-position-row">
             <span>${escapeHtml(position)}</span>
             <input data-dept-position-old="${escapeHtml(position)}" value="${escapeHtml(position)}" ${position === "Direktion" ? "readonly" : ""}>
+            <select data-dept-position-color class="position-color-select">
+              ${colorOptions.map(([value, label]) => `<option value="${value}" ${positionColorFor(department, position) === value ? "selected" : ""}>${label}</option>`).join("")}
+            </select>
             <label class="leader-position-toggle"><input type="checkbox" data-dept-position-leader ${leaderPositions.includes(position) || position === "Direktion" ? "checked" : ""} ${position === "Direktion" ? "disabled" : ""}><span>Leader</span></label>
             <span class="position-order-controls">
               <button class="mini-icon move-department-position" type="button" data-direction="-1" title="Nach oben">${iconSvg("ChevronUp")}</button>
@@ -2741,7 +2892,8 @@ function collectDepartmentPositions(modal) {
   return Array.from(modal.querySelectorAll("[data-dept-position-old]")).map((input) => ({
     old: input.dataset.deptPositionOld,
     label: input.value.trim(),
-    leader: Boolean(input.closest(".department-position-row")?.querySelector("[data-dept-position-leader]")?.checked)
+    leader: Boolean(input.closest(".department-position-row")?.querySelector("[data-dept-position-leader]")?.checked),
+    color: input.closest(".department-position-row")?.querySelector("[data-dept-position-color]")?.value || defaultPositionColor(input.value.trim())
   })).filter((item) => item.label);
 }
 
@@ -2769,6 +2921,12 @@ function openPagePermissionModal(page) {
         <label class="department-position-row">
           <span>Neu</span>
           <input data-dept-position-old="" value="" placeholder="Name des neuen Rangs">
+          <select data-dept-position-color class="position-color-select">
+            <option value="green">Grün</option>
+            <option value="red">Rot</option>
+            <option value="orange">Orange</option>
+            <option value="blue" selected>Blau</option>
+          </select>
           <label class="leader-position-toggle"><input type="checkbox" data-dept-position-leader><span>Leader</span></label>
           <span class="position-order-controls">
             <button class="mini-icon move-department-position" type="button" data-direction="-1" title="Nach oben">${iconSvg("ChevronUp")}</button>
@@ -2896,7 +3054,7 @@ function renderDepartmentCard(department) {
   return `
     <article class="department-card">
       <div class="department-card-head">
-        <strong>${iconSvg("Direktion")} ${escapeHtml(department.name)}</strong>
+        <strong>${iconSvg("Direktion")} ${escapeHtml(department.name)} <span class="department-member-count">${members.length}</span></strong>
         <span class="application-pill ${department.applicationStatus === "Offen" ? "open" : "closed"}">${escapeHtml(department.applicationStatus)}</span>
       </div>
       <button class="department-info info-strip" data-department-id="${escapeHtml(department.id)}">${iconSvg("Informationen")} Informationen</button>
@@ -2905,7 +3063,7 @@ function renderDepartmentCard(department) {
         <tbody>
           ${visibleMembers.length ? visibleMembers.map((member) => `
             <tr>
-              <td><span class="position-chip ${positionClass(member.position)}">${escapeHtml(member.position)}</span></td>
+              <td><span class="position-chip ${positionClass(member.position, department)}">${escapeHtml(member.position)}</span></td>
               <td>${escapeHtml(member.user.rank)}</td>
               <td class="dept-card-name"><span class="online-dot ${member.isOnDuty ? "online" : ""}"></span><span>${escapeHtml(fullName(member.user))}</span></td>
             </tr>
@@ -7018,7 +7176,7 @@ function renderDepartmentMemberTable(department) {
           ${department.members.map((member) => `
             <tr>
               <td><span class="member-name truncate"><span class="online-dot ${member.isOnDuty ? "online" : ""}"></span>${avatarMarkup(member.user, "sm")}<span>${escapeHtml(fullName(member.user))}</span></span></td>
-              <td><span class="position-chip ${positionClass(member.position)}">${escapeHtml(member.position)}</span></td>
+              <td><span class="position-chip ${positionClass(member.position, department)}">${escapeHtml(member.position)}</span></td>
               <td><span class="department-rank-label">${escapeHtml(rankLabel(member.user.rank))}</span></td>
             </tr>
           `).join("")}
@@ -7045,11 +7203,8 @@ function renderDepartmentNote(department, note) {
   `;
 }
 
-function positionClass(position) {
-  if (position === "Direktion" || position === "Anwärter") return "green";
-  if (position === "Leitung") return "red";
-  if (position === "Stv. Leitung") return "orange";
-  return "blue";
+function positionClass(position, department = null) {
+  return positionColorFor(department, position);
 }
 
 function renderProfileTrainingPanel(user) {
@@ -8152,6 +8307,7 @@ function openUserModal(user) {
       <label>Nachname / Doppelname<input name="lastName" value="${escapeHtml(user?.lastName || "")}" required></label>
       <label>Telefonnummer<input name="phone" value="${escapeHtml(user?.phone || "")}" required></label>
       <label>DN<input name="dn" id="userDnInput" inputmode="numeric" pattern="[0-9]+" value="${escapeHtml(initialDn)}" required></label>
+      <label>Discord User-ID<input name="discordId" inputmode="numeric" pattern="[0-9]*" value="${escapeHtml(user?.discordId || "")}" placeholder="Optional"></label>
       <label>Einstellungsdatum<input name="joinedAt" type="date" value="${escapeHtml((user?.joinedAt || new Date().toISOString()).slice(0, 10))}"></label>
       <div id="userDnConflict" class="full">${renderDnConflictBox(initialDnConflict, initialDn)}</div>
       <label>Rang
@@ -8806,7 +8962,7 @@ function openDepartmentInfoModal(department) {
       <div class="info-box"><strong>Bewerbungsstatus</strong><span class="application-pill ${department.applicationStatus === "Offen" ? "open" : "closed"}">${escapeHtml(department.applicationStatus)}</span></div>
       <div class="info-box"><strong>Voraussetzungen</strong><p><span class="requirements-pill">${escapeHtml(department.requirements)}</span></p></div>
       <div class="info-box full personnel-box"><strong>${iconSvg("Mitglieder")} Personal (${department.members.length})</strong>
-        <div class="personnel-list">${department.members.map((member) => `<div class="personnel-row"><span><b>${escapeHtml(fullName(member.user))}</b><small>${escapeHtml(rankLabel(member.user.rank))}</small></span><span class="position-chip ${positionClass(member.position)}">${escapeHtml(member.position)}</span></div>`).join("") || "<p>Keine Mitglieder.</p>"}</div>
+        <div class="personnel-list">${department.members.map((member) => `<div class="personnel-row"><span><b>${escapeHtml(fullName(member.user))}</b><small>${escapeHtml(rankLabel(member.user.rank))}</small></span><span class="position-chip ${positionClass(member.position, department)}">${escapeHtml(member.position)}</span></div>`).join("") || "<p>Keine Mitglieder.</p>"}</div>
       </div>
     </div>
     <div class="modal-actions">

@@ -4252,6 +4252,75 @@ table td.text-left {
   gap: 8px;
 }
 
+.discord-sync-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, .8fr) minmax(320px, 1.2fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.discord-sync-config,
+.discord-sync-section,
+.discord-department-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #263a53;
+  border-radius: 8px;
+  background: rgba(10, 17, 30, .58);
+}
+
+.discord-sync-section {
+  grid-column: 2;
+}
+
+.discord-sync-section > div:first-child,
+.discord-department-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.discord-sync-section strong,
+.discord-department-card strong {
+  color: #dceaff;
+}
+
+.discord-sync-section small,
+.discord-department-card small {
+  color: #8fa0b8;
+}
+
+.discord-role-grid,
+.discord-department-list {
+  display: grid;
+  gap: 8px;
+}
+
+.discord-role-row {
+  display: grid;
+  grid-template-columns: minmax(160px, .8fr) minmax(180px, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.discord-role-row span {
+  color: #cfe1fb;
+  font-size: 13px;
+}
+
+.switch-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cfe1fb;
+  font-weight: 800;
+}
+
+.switch-line input {
+  width: auto;
+  accent-color: #2877ff;
+}
+
 .it-password-panel {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(220px, 320px) auto;
@@ -4390,7 +4459,7 @@ table td.text-left {
 }
 
 .department-position-row {
-  grid-template-columns: minmax(150px, .6fr) minmax(220px, 1fr) auto auto auto;
+  grid-template-columns: minmax(140px, .55fr) minmax(190px, 1fr) 110px auto auto auto;
 }
 
 .leader-position-toggle,
@@ -4409,6 +4478,10 @@ table td.text-left {
 
 .leader-position-toggle input {
   accent-color: #2877ff;
+}
+
+.position-color-select {
+  min-width: 100px;
 }
 
 .permission-panel {
@@ -4940,6 +5013,22 @@ table td.text-left {
   color: #67a5ff;
   border: 1px solid #2563eb;
   background: rgba(37, 99, 235, .18);
+}
+
+.department-member-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  margin-left: 6px;
+  padding: 2px 8px;
+  color: #dcecff;
+  border: 1px solid rgba(99, 168, 255, .38);
+  border-radius: 999px;
+  background: rgba(40, 119, 255, .16);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .department-rank-label {
@@ -7140,8 +7229,14 @@ table td.text-left {
 
   .it-overview-headline,
   .it-overview-grid,
-  .it-overview-restarts {
+  .it-overview-restarts,
+  .discord-sync-layout,
+  .discord-role-row {
     grid-template-columns: 1fr;
+  }
+
+  .discord-sync-section {
+    grid-column: auto;
   }
 
   .it-status-strip {

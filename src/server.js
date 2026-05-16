@@ -12,12 +12,30 @@ const DB_FILE = path.join(STORAGE_DIR, "dienstblatt.json");
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DEFAULT_PASSWORD = "LSPD12345";
 
+loadEnvFile(path.join(ROOT, ".env"));
+
 const roles = ["User", "Supervisor", "Direktion", "IT", "IT-Leitung"];
 const rolePower = { User: 1, Supervisor: 2, Direktion: 3, IT: 4, "IT-Leitung": 5 };
 const ranks = Array.from({ length: 13 }, (_, index) => ({
   value: index,
   label: `Template ${index} - Rang ${index}`
 }));
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  fs.readFileSync(filePath, "utf8").split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+    const separator = trimmed.indexOf("=");
+    if (separator === -1) return;
+    const key = trimmed.slice(0, separator).trim();
+    let value = trimmed.slice(separator + 1).trim();
+    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  });
+}
 
 function defaultRanks() {
   return ranks.map((rank) => ({ ...rank }));
@@ -55,6 +73,7 @@ function makeDepartment(id, name, description, applicationStatus) {
     factions: [],
     positions: [...departmentPositions],
     leaderPositions: ["Direktion", "Leitung", "Stv. Leitung"],
+    positionColors: { Direktion: "green", Leitung: "red", "Stv. Leitung": "orange", Mitglied: "blue", "Anwärter": "green" },
     members: [],
     notes: [],
     memberNotes: []
@@ -173,6 +192,7 @@ function ensureStorage() {
       permissions: defaultPermissions(),
       devMode: false,
       defaultPassword: DEFAULT_PASSWORD,
+      discordSync: defaultDiscordSync(),
       restartTimes: [],
       restartLastRun: {}
     },
@@ -195,6 +215,7 @@ function readDb() {
   }
   db.users.forEach((user) => {
     if (!user.baseRole) user.baseRole = ["IT", "IT-Leitung"].includes(user.role) ? "Direktion" : user.role || "User";
+    user.discordId = typeof user.discordId === "string" ? user.discordId : "";
     user.teamler = Boolean(user.teamler);
     user.trainingMeta = user.trainingMeta && typeof user.trainingMeta === "object" ? user.trainingMeta : {};
     if (user.trainings?.Schiessen && !user.trainings["Schießen"]) {
@@ -219,6 +240,7 @@ function readDb() {
   db.settings.permissions = normalizePermissions(db.settings.permissions);
   db.settings.devMode = Boolean(db.settings.devMode);
   db.settings.defaultPassword = String(db.settings.defaultPassword || DEFAULT_PASSWORD);
+  db.settings.discordSync = normalizeDiscordSync(db.settings.discordSync);
   db.settings.restartTimes = Array.isArray(db.settings.restartTimes) ? db.settings.restartTimes : [];
   db.settings.restartLastRun = db.settings.restartLastRun && typeof db.settings.restartLastRun === "object" ? db.settings.restartLastRun : {};
   db.settings.informationRightsText = String(db.settings.informationRightsText || "");
@@ -254,6 +276,7 @@ function normalizeDepartments(existingDepartments) {
       factions: Array.isArray(stored?.factions) ? stored.factions : department.factions,
       positions: normalizeDepartmentPositions(stored?.positions || department.positions),
       leaderPositions: normalizeDepartmentLeaderPositions(stored?.leaderPositions, stored?.positions || department.positions),
+      positionColors: normalizeDepartmentPositionColors(stored?.positionColors, stored?.positions || department.positions),
       members: Array.isArray(stored?.members) ? stored.members : department.members,
       notes: Array.isArray(stored?.notes) ? stored.notes : department.notes,
       memberNotes: Array.isArray(stored?.memberNotes) ? stored.memberNotes : department.memberNotes
@@ -271,6 +294,7 @@ function normalizeDepartments(existingDepartments) {
       factions: Array.isArray(department.factions) ? department.factions : [],
       positions: normalizeDepartmentPositions(department.positions || departmentPositions),
       leaderPositions: normalizeDepartmentLeaderPositions(department.leaderPositions, department.positions || departmentPositions),
+      positionColors: normalizeDepartmentPositionColors(department.positionColors, department.positions || departmentPositions),
       members: Array.isArray(department.members) ? department.members : [],
       notes: Array.isArray(department.notes) ? department.notes : [],
       memberNotes: Array.isArray(department.memberNotes) ? department.memberNotes : []
@@ -288,6 +312,64 @@ function normalizeDepartmentLeaderPositions(value, positionsValue = departmentPo
   const fallback = positions.filter((position) => ["Direktion", "Leitung", "Stv. Leitung"].includes(position));
   const incoming = Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter((item) => positions.includes(item)) : fallback;
   return [...new Set(incoming.length ? incoming : fallback)];
+}
+
+function defaultPositionColor(position) {
+  if (position === "Direktion" || position === "Anwärter") return "green";
+  if (position === "Leitung") return "red";
+  if (position === "Stv. Leitung") return "orange";
+  if (position === "Mitglied") return "blue";
+  return "blue";
+}
+
+function normalizeDepartmentPositionColors(value, positionsValue = departmentPositions) {
+  const positions = normalizeDepartmentPositions(positionsValue);
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(positions.map((position) => {
+    const color = String(source[position] || defaultPositionColor(position)).trim();
+    return [position, ["green", "red", "orange", "blue"].includes(color) ? color : defaultPositionColor(position)];
+  }));
+}
+
+function defaultDiscordSync() {
+  return {
+    enabled: false,
+    applicationId: process.env.DISCORD_APPLICATION_ID || "",
+    publicKey: process.env.DISCORD_PUBLIC_KEY || "",
+    serverId: "",
+    botToken: process.env.DISCORD_BOT_TOKEN || "",
+    rankRoles: {},
+    departmentRoles: {}
+  };
+}
+
+function normalizeDiscordRoleMap(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(Object.entries(source)
+    .map(([key, roleId]) => [String(key || "").trim(), String(roleId || "").trim()])
+    .filter(([key, roleId]) => key && roleId));
+}
+
+function normalizeDiscordSync(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    enabled: Boolean(source.enabled),
+    applicationId: String(source.applicationId || process.env.DISCORD_APPLICATION_ID || "").trim(),
+    publicKey: String(source.publicKey || process.env.DISCORD_PUBLIC_KEY || "").trim(),
+    serverId: String(source.serverId || process.env.DISCORD_SERVER_ID || "").trim(),
+    botToken: String(source.botToken || process.env.DISCORD_BOT_TOKEN || "").trim(),
+    rankRoles: normalizeDiscordRoleMap(source.rankRoles),
+    departmentRoles: normalizeDiscordRoleMap(source.departmentRoles)
+  };
+}
+
+function publicDiscordSync(value) {
+  const sync = normalizeDiscordSync(value);
+  return {
+    ...sync,
+    botToken: "",
+    botTokenSet: Boolean(sync.botToken)
+  };
 }
 
 function departmentPositionsFor(department) {
@@ -339,8 +421,84 @@ function publicUser(user) {
 }
 
 function publicSettings(settings) {
-  const { defaultPassword, ...safeSettings } = settings || {};
-  return safeSettings;
+  const { defaultPassword, discordSync, ...safeSettings } = settings || {};
+  return {
+    ...safeSettings,
+    discordSync: publicDiscordSync(discordSync)
+  };
+}
+
+function discordRoleIdsForUser(db, user) {
+  const sync = normalizeDiscordSync(db.settings?.discordSync);
+  const roleIds = new Set();
+  if (user.terminated) return roleIds;
+  const rankRole = sync.rankRoles[String(user.rank)];
+  if (rankRole) roleIds.add(rankRole);
+  (db.settings?.departments || []).forEach((department) => {
+    const membership = department.members?.find((member) => member.userId === user.id);
+    if (!membership) return;
+    const roleId = sync.departmentRoles[`${department.id}:${membership.position}`];
+    if (roleId) roleIds.add(roleId);
+  });
+  return roleIds;
+}
+
+function allConfiguredDiscordRoleIds(sync) {
+  return new Set([
+    ...Object.values(sync.rankRoles || {}),
+    ...Object.values(sync.departmentRoles || {})
+  ].filter(Boolean));
+}
+
+function discordApiRequest(method, sync, pathName) {
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      hostname: "discord.com",
+      path: `/api/v10${pathName}`,
+      method,
+      headers: {
+        Authorization: `Bot ${sync.botToken}`,
+        "User-Agent": "LSPD-Dienstblatt Discord Sync"
+      }
+    }, (response) => {
+      let body = "";
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          if (!body) return resolve({});
+          try {
+            return resolve(JSON.parse(body));
+          } catch {
+            return resolve({ raw: body });
+          }
+        }
+        reject(new Error(`Discord API ${method} ${pathName}: HTTP ${response.statusCode}`));
+      });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function requestDiscordRole(method, sync, userId, roleId) {
+  return discordApiRequest(method, sync, `/guilds/${encodeURIComponent(sync.serverId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`);
+}
+
+function syncDiscordRolesForUser(db, user, reason = "update") {
+  const sync = normalizeDiscordSync(db.settings?.discordSync);
+  if (!sync.enabled || !sync.serverId || !sync.botToken || !user?.discordId) return;
+  const targetRoleIds = discordRoleIdsForUser(db, user);
+  const configuredRoleIds = allConfiguredDiscordRoleIds(sync);
+  const jobs = [];
+  configuredRoleIds.forEach((roleId) => {
+    jobs.push(requestDiscordRole(targetRoleIds.has(roleId) ? "PUT" : "DELETE", sync, user.discordId, roleId));
+  });
+  Promise.allSettled(jobs).then((results) => {
+    const failed = results.filter((result) => result.status === "rejected");
+    if (failed.length) console.warn(`Discord Sync fuer ${actorName(user)} (${reason}) unvollstaendig:`, failed.map((item) => item.reason?.message || item.reason).join("; "));
+  });
 }
 
 function logFluctuation(db, user, type, actor) {
@@ -563,6 +721,7 @@ function normalizeUserInput(body, existingUser) {
   const lastName = String(body.lastName || "").trim();
   const phone = String(body.phone || "").trim();
   const dn = String(body.dn || "").trim();
+  const discordId = String(body.discordId || existingUser?.discordId || "").trim();
   const rankMatch = String(body.rank ?? "").match(/\d+/);
   const rank = rankMatch ? Number(rankMatch[0]) : NaN;
   const role = roles.includes(body.role) ? body.role : existingUser?.role || "User";
@@ -581,6 +740,10 @@ function normalizeUserInput(body, existingUser) {
 
   const dnError = validateDigits(dn, "DN");
   if (dnError) return { error: dnError };
+  if (discordId) {
+    const discordIdError = validateDigits(discordId, "Discord User-ID");
+    if (discordIdError) return { error: discordIdError };
+  }
   if (rank < 0) return { error: "Rang muss mindestens 0 sein." };
 
   return {
@@ -589,6 +752,7 @@ function normalizeUserInput(body, existingUser) {
       lastName,
       phone,
       dn,
+      discordId,
       rank,
       role,
       baseRole,
@@ -873,6 +1037,7 @@ app.post("/api/users", requireAuth, requireRole("Direktion"), (req, res) => {
   logFluctuation(req.db, user, "Eingestellt", req.user);
   logAction(req.db, req.user, "Mitglied eingestellt", `${user.firstName} ${user.lastName}`.trim(), { after: publicUser(user) });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, user, "Mitglied eingestellt");
   res.status(201).json({ user: publicUser(user) });
 });
 
@@ -903,6 +1068,7 @@ app.patch("/api/users/:id", requireAuth, requireRole("Direktion"), (req, res) =>
   const after = publicUser(user);
   logAction(req.db, req.user, "Benutzer bearbeitet", `${user.firstName} ${user.lastName}`.trim(), { before, after, description: userChangeSummary(req.db, before, after) });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, user, "Benutzer bearbeitet");
   res.json({ user: publicUser(user) });
 });
 
@@ -991,6 +1157,7 @@ app.post("/api/users/:id/uprank", requireAuth, requireRole("Direktion"), (req, r
     description: `Uprank: ${rankText(req.db, before.rank)} -> ${rankText(req.db, after.rank)}; Ingame erledigt; Discord erledigt${reason ? `; Grund: ${reason}` : ""}`
   });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, user, "Uprank");
   res.json({ user: after });
 });
 
@@ -1055,6 +1222,7 @@ app.post("/api/users/:id/dismiss", requireAuth, requireRole("Direktion"), (req, 
   logDisciplinary(req.db, user, "Entlassen", reason, req.user);
   logAction(req.db, req.user, "Benutzer entlassen", `${user.firstName} ${user.lastName}`.trim(), { reason, before, after: publicUser(user) });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, user, "Benutzer entlassen");
   res.json({ user: publicUser(user) });
 });
 
@@ -1105,6 +1273,7 @@ app.post("/api/users/:id/rehire", requireAuth, requireRole("Direktion"), (req, r
   logDisciplinary(req.db, user, "Wiedereinstellung", req.db.settings.fluctuation[0].reason, req.user);
   logAction(req.db, req.user, "Benutzer wiedereingestellt", `${user.firstName} ${user.lastName}`.trim(), { before, after: publicUser(user) });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, user, "Benutzer wiedereingestellt");
   res.json({ user: publicUser(user) });
 });
 
@@ -1389,6 +1558,48 @@ app.patch("/api/it/default-password", requireAuth, requireRole("IT"), (req, res)
   res.json({ settings: publicSettings(req.db.settings) });
 });
 
+app.patch("/api/it/discord-sync", requireAuth, requireRole("IT"), (req, res) => {
+  const incoming = req.body.discordSync && typeof req.body.discordSync === "object" ? req.body.discordSync : {};
+  const current = normalizeDiscordSync(req.db.settings.discordSync);
+  const clearBotToken = Boolean(incoming.clearBotToken);
+  const next = normalizeDiscordSync({
+    ...incoming,
+    botToken: clearBotToken ? "" : String(incoming.botToken || "").trim() || current.botToken
+  });
+  const before = publicDiscordSync(current);
+  req.db.settings.discordSync = next;
+  logAction(req.db, req.user, "Discord Sync geaendert", "IT", { before, after: publicDiscordSync(next) });
+  writeDb(req.db);
+  res.json({ settings: publicSettings(req.db.settings) });
+});
+
+app.post("/api/it/discord-sync/run", requireAuth, requireRole("IT"), (req, res) => {
+  const sync = normalizeDiscordSync(req.db.settings.discordSync);
+  if (!sync.enabled || !sync.serverId || !sync.botToken) return res.status(400).json({ error: "Discord Sync ist noch nicht vollstaendig eingerichtet." });
+  const users = req.db.users.filter((user) => user.discordId);
+  users.forEach((user) => syncDiscordRolesForUser(req.db, user, "Manueller Gesamtsync"));
+  logAction(req.db, req.user, "Discord Sync gestartet", "IT", { users: users.length });
+  writeDb(req.db);
+  res.json({ synced: users.length });
+});
+
+app.post("/api/it/discord-sync/test", requireAuth, requireRole("IT"), async (req, res) => {
+  const sync = normalizeDiscordSync(req.db.settings.discordSync);
+  if (!sync.botToken) return res.status(400).json({ error: "Bot Token fehlt." });
+  try {
+    const bot = await discordApiRequest("GET", sync, "/users/@me");
+    let guild = null;
+    if (sync.serverId) guild = await discordApiRequest("GET", sync, `/guilds/${encodeURIComponent(sync.serverId)}`);
+    res.json({
+      ok: true,
+      botName: bot.username ? `${bot.username}${bot.discriminator && bot.discriminator !== "0" ? `#${bot.discriminator}` : ""}` : "Discord Bot",
+      guildName: guild?.name || ""
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Discord Verbindung fehlgeschlagen." });
+  }
+});
+
 app.post("/api/it/users/:id/reset-password", requireAuth, requireRole("IT"), (req, res) => {
   const user = req.db.users.find((item) => item.id === req.params.id && !item.terminated);
   if (!user) return res.status(404).json({ error: "Benutzer nicht gefunden." });
@@ -1466,7 +1677,8 @@ app.patch("/api/departments/:departmentId/positions", requireAuth, requireRole("
     .map((item) => ({
       old: String(item.old || "").trim(),
       label: String(item.label || "").trim(),
-      leader: Boolean(item.leader)
+      leader: Boolean(item.leader),
+      color: String(item.color || "").trim()
     }))
     .filter((item) => item.label);
   const nextPositions = [...new Set(normalized.map((item) => item.label))];
@@ -1476,7 +1688,7 @@ app.patch("/api/departments/:departmentId/positions", requireAuth, requireRole("
   const positionInUse = removedPositions.find((position) => department.members.some((member) => member.position === position));
   if (positionInUse) return res.status(400).json({ error: `Die Position ${positionInUse} ist noch vergeben und kann nicht entfernt werden.` });
 
-  const before = { positions: [...departmentPositionsFor(department)], leaderPositions: [...departmentLeaderPositionsFor(department)] };
+  const before = { positions: [...departmentPositionsFor(department)], leaderPositions: [...departmentLeaderPositionsFor(department)], positionColors: { ...(department.positionColors || {}) } };
   normalized.forEach((item) => {
     if (item.old && item.old !== item.label) {
       department.members.forEach((member) => {
@@ -1486,7 +1698,8 @@ app.patch("/api/departments/:departmentId/positions", requireAuth, requireRole("
   });
   department.positions = nextPositions;
   department.leaderPositions = [...new Set(normalized.filter((item) => item.leader || item.label === "Direktion").map((item) => item.label))].filter((position) => nextPositions.includes(position));
-  logAction(req.db, req.user, "Abteilungsränge geändert", department.name, { before, after: { positions: department.positions, leaderPositions: department.leaderPositions } });
+  department.positionColors = normalizeDepartmentPositionColors(Object.fromEntries(normalized.map((item) => [item.label, item.color || defaultPositionColor(item.label)])), nextPositions);
+  logAction(req.db, req.user, "Abteilungsränge geändert", department.name, { before, after: { positions: department.positions, leaderPositions: department.leaderPositions, positionColors: department.positionColors } });
   writeDb(req.db);
   res.json({ department: publicDepartment(department, req.db, req.user) });
 });
@@ -1522,6 +1735,7 @@ app.post("/api/departments/:departmentId/members", requireAuth, (req, res) => {
   department.members.push({ userId, position, joinedAt: todayIso(), positionSince: todayIso() });
   logAction(req.db, req.user, "Abteilungsmitglied hinzugefügt", department.name, { userId, position });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, addedUser, "Abteilungsmitglied hinzugefuegt");
   res.status(201).json({ department: publicDepartment(department, req.db, req.user) });
 });
 
@@ -1537,6 +1751,7 @@ app.patch("/api/departments/:departmentId/members/:userId", requireAuth, (req, r
   member.position = nextPosition;
   logAction(req.db, req.user, "Abteilungsmitglied bearbeitet", department.name, { before, after: member });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, req.db.users.find((user) => user.id === req.params.userId), "Abteilungsmitglied bearbeitet");
   res.json({ department: publicDepartment(department, req.db, req.user) });
 });
 
@@ -1548,6 +1763,7 @@ app.delete("/api/departments/:departmentId/members/:userId", requireAuth, (req, 
   department.members = department.members.filter((member) => member.userId !== req.params.userId);
   logAction(req.db, req.user, "Abteilungsmitglied entfernt", department.name, { userId: req.params.userId });
   writeDb(req.db);
+  syncDiscordRolesForUser(req.db, removedUser, "Abteilungsmitglied entfernt");
   res.json({ department: publicDepartment(department, req.db, req.user) });
 });
 

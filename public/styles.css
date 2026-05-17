@@ -4455,6 +4455,13 @@ table td.text-left {
   filter: brightness(1.08);
 }
 
+.discord-login-btn.loading,
+.discord-login-btn:disabled {
+  opacity: .82;
+  cursor: wait;
+  transform: none;
+}
+
 .profile-discord-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -7221,11 +7228,17 @@ table td.text-left {
   font-size: 30px;
 }
 
+.login-action-stack {
+  display: grid;
+  gap: 10px;
+}
+
 .login-panel .primary-btn,
 .login-panel .discord-login-btn {
   min-height: 48px;
   border-radius: 8px;
   font-size: 14px;
+  transition: transform .14s ease, filter .14s ease, opacity .14s ease;
 }
 
 .login-panel .primary-btn {

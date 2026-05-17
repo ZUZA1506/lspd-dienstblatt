@@ -163,7 +163,7 @@ const notifyRoot = $("#notifyRoot");
 const warmedAvatarUrls = new Set();
 
 function warmAvatarCache() {
-  ["/lspd-logo.png?v=20260515-4", ...(state.users || []).map((user) => user.avatarUrl).filter(Boolean)].forEach((url) => {
+  ["/assets/lspd-logo-20260515.png", ...(state.users || []).map((user) => user.avatarUrl).filter(Boolean)].forEach((url) => {
     if (warmedAvatarUrls.has(url)) return;
     warmedAvatarUrls.add(url);
     const image = new Image();
@@ -238,7 +238,7 @@ function avatarMarkup(user = state.currentUser, size = "md") {
   if (user?.avatarUrl) {
     return `<img class="avatar ${size}" src="${escapeHtml(user.avatarUrl)}" alt="Avatar" loading="eager" decoding="async" fetchpriority="high">`;
   }
-  return `<img class="avatar ${size}" src="/lspd-logo.png?v=20260515-4" alt="LSPD" loading="eager" decoding="async" fetchpriority="high">`;
+  return `<img class="avatar ${size}" src="/assets/lspd-logo-20260515.png" alt="LSPD" loading="eager" decoding="async" fetchpriority="high">`;
 }
 
 function rankLabel(rank) {
@@ -519,7 +519,13 @@ async function api(path, options = {}) {
 
 async function startDiscordOAuth(mode = "login") {
   const targetError = $("#loginError");
+  const button = mode === "login" ? $("#discordLoginBtn") : null;
   try {
+    if (button) {
+      button.disabled = true;
+      button.classList.add("loading");
+      button.textContent = "Weiter zu Discord...";
+    }
     const config = await api("/api/discord/oauth-config", { silent: true });
     if (!config.applicationId) throw new Error("Discord Login ist noch nicht eingerichtet.");
     const oauthState = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
@@ -535,6 +541,11 @@ async function startDiscordOAuth(mode = "login") {
     });
     window.location.href = `https://discord.com/oauth2/authorize?${params.toString()}`;
   } catch (error) {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("loading");
+      button.textContent = "Mit Discord einloggen";
+    }
     if (targetError) targetError.textContent = error.message;
     else showNotify(error.message, "error");
   }
@@ -753,7 +764,7 @@ function renderPasswordChangeRequired() {
   content.innerHTML = `
     <section class="force-password-stage">
       <div class="force-password-brand">
-        <img src="/lspd-logo.png?v=20260515-4" alt="LSPD">
+        <img src="/assets/lspd-logo-20260515.png" alt="LSPD">
         <span>LSPD Dienstblatt</span>
       </div>
       <div class="panel force-password-panel">
@@ -2455,17 +2466,21 @@ function renderDiscordSyncPanel() {
           </div>
         </div>
         <div class="discord-sync-section">
-          <div><strong>Abteilungsrollen</strong><small>Pro Abteilung und interner Position kann eine Discord-Rolle hinterlegt werden.</small></div>
+          <div><strong>Abteilungsrollen</strong><small>Pro Abteilung werden nur Leader-Rollen einzeln und eine allgemeine Mitgliederrolle gepflegt.</small></div>
           <div class="discord-department-list">
             ${departments.map((department) => `
               <article class="discord-department-card">
-                <div><strong>${escapeHtml(department.name)}</strong><small>${departmentPositionsFor(department).length} Positionen</small></div>
+                <div><strong>${escapeHtml(department.name)}</strong><small>${departmentLeaderPositionsFor(department).filter((position) => position !== "Direktion").length} Leader-Rollen + Mitglieder</small></div>
                 <div class="discord-role-grid">
-                  ${departmentPositionsFor(department).map((position) => {
+                  ${[
+                    ...departmentLeaderPositionsFor(department).filter((position) => position !== "Direktion"),
+                    "__member"
+                  ].map((position) => {
                     const key = `${department.id}:${position}`;
+                    const label = position === "__member" ? `${department.name} Mitglieder` : `${department.name} ${position} Leader`;
                     return `
                       <div class="discord-role-row">
-                        <span>${escapeHtml(position)}</span>
+                        <span>${escapeHtml(label)}</span>
                         ${renderDiscordRolePicker("data-discord-dept-role", key, departmentRoles[key] || [])}
                       </div>
                     `;

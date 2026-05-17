@@ -7,14 +7,14 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>LSPD Dienstblatt</title>
-    <link rel="icon" type="image/png" href="/lspd-logo.png?v=20260515-4">
-    <link rel="preload" as="image" href="/lspd-logo.png?v=20260515-4" fetchpriority="high">
+    <link rel="icon" type="image/png" href="/assets/lspd-logo-20260515.png">
+    <link rel="preload" as="image" href="/assets/lspd-logo-20260515.png" fetchpriority="high">
     <link rel="stylesheet" href="/styles.css?v=20260515-4">
   </head>
   <body>
     <div id="loadingView" class="loading-shell">
       <div class="loading-panel">
-        <img src="/lspd-logo.png?v=20260515-4" alt="LSPD" fetchpriority="high" decoding="async">
+        <img src="/assets/lspd-logo-20260515.png" alt="LSPD" fetchpriority="high" decoding="async" width="82" height="82">
         <strong>Dienstblatt wird geladen</strong>
         <span></span>
       </div>
@@ -23,7 +23,7 @@
     <div id="loginView" class="login-shell hidden">
       <section class="login-stage">
         <div class="login-intro">
-          <img src="/lspd-logo.png?v=20260515-4" alt="LSPD" fetchpriority="high" decoding="async">
+          <img src="/assets/lspd-logo-20260515.png" alt="LSPD" fetchpriority="high" decoding="sync" width="86" height="86">
           <p class="eyebrow">Los Santos Police Department</p>
           <h1>LSPD Dienstblatt</h1>
           <p>Interne Verwaltung, Dienstzeiten, Abteilungen und Einsatzinformationen an einem zentralen Ort.</p>
@@ -47,8 +47,10 @@
             Passwort
             <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Passwort" required>
           </label>
-          <button type="submit" class="primary-btn">Einloggen</button>
-          <button type="button" class="discord-login-btn" id="discordLoginBtn">Mit Discord einloggen</button>
+          <div class="login-action-stack">
+            <button type="submit" class="primary-btn" id="passwordLoginBtn">Einloggen</button>
+            <button type="button" class="discord-login-btn" id="discordLoginBtn">Mit Discord einloggen</button>
+          </div>
           <p id="loginError" class="form-error"></p>
           <footer>© 2026 LSPD Dienstblatt · Mit Liebe gemacht von Daniel</footer>
         </form>
@@ -58,7 +60,7 @@
     <div id="appView" class="app-shell hidden">
       <aside class="sidebar">
         <div class="brand">
-          <img src="/lspd-logo.png?v=20260515-4" alt="LSPD">
+          <img src="/assets/lspd-logo-20260515.png" alt="LSPD">
           <strong>LSPD Dienstblatt</strong>
         </div>
         <div class="profile-card"></div>
@@ -91,7 +93,7 @@
     <div id="modalRoot" class="modal-root hidden"></div>
     <div id="inspectBlocker" class="inspect-blocker hidden">
       <div>
-        <img src="/lspd-logo.png?v=20260515-4" alt="LSPD">
+        <img src="/assets/lspd-logo-20260515.png" alt="LSPD">
         <strong>Zugriff blockiert</strong>
         <p>Die Seitenuntersuchung ist im Dienstblatt deaktiviert.</p>
       </div>

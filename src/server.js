@@ -457,7 +457,10 @@ function discordRoleIdsForUser(db, user) {
   (db.settings?.departments || []).forEach((department) => {
     const membership = department.members?.find((member) => member.userId === user.id);
     if (!membership) return;
-    (sync.departmentRoles[`${department.id}:${membership.position}`] || []).forEach((roleId) => roleIds.add(roleId));
+    const leaderKey = `${department.id}:${membership.position}`;
+    const memberKey = `${department.id}:__member`;
+    const key = isDepartmentLeaderPosition(department, membership.position) ? leaderKey : memberKey;
+    (sync.departmentRoles[key] || []).forEach((roleId) => roleIds.add(roleId));
   });
   return roleIds;
 }
@@ -936,7 +939,7 @@ app.use(express.static(PUBLIC_DIR, {
     }
     if (filePath.endsWith(".js")) res.setHeader("Content-Type", "application/javascript; charset=utf-8");
     if (filePath.endsWith(".css")) res.setHeader("Content-Type", "text/css; charset=utf-8");
-    if (/\.(png|jpg|jpeg|webp|gif|svg|ico)$/i.test(filePath)) {
+    if (filePath.includes(`${path.sep}assets${path.sep}`) || /\.(png|jpg|jpeg|webp|gif|svg|ico)$/i.test(filePath)) {
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     }
   }

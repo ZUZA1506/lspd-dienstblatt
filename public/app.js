@@ -6664,7 +6664,6 @@ async function deleteInformationDocChange(changeId, docId) {
 function openInformationDocChangelog(docId, focusChangeId = "") {
   const doc = informationDocs().find((item) => item.id === docId);
   if (!doc) return;
-  const canManage = canAccess("actions", "manageInformation", "Direktion");
   const changes = informationDocChangesFor(docId);
   openModal(`
     <div class="doc-compare-head">
@@ -6677,7 +6676,6 @@ function openInformationDocChangelog(docId, focusChangeId = "") {
         <article class="info-change-row ${change.id === focusChangeId ? "focus-change" : ""}">
           <div class="change-row-head">
             <span><strong>${escapeHtml(change.action || "geändert")}</strong><small>${escapeHtml(change.author || "-")} · ${formatDateTime(change.createdAt)}</small></span>
-            ${canManage ? `<button class="mini-icon danger delete-doc-change" data-change-id="${escapeHtml(change.id)}" title="Changelog löschen">${actionIcon("delete")}</button>` : ""}
           </div>
           <div class="doc-compare-grid compact">
             <section class="doc-compare-panel before">
@@ -6695,13 +6693,6 @@ function openInformationDocChangelog(docId, focusChangeId = "") {
     <div class="modal-actions"><button class="ghost-btn" data-close>Schließen</button></div>
   `, (modal) => {
     modal.classList.add("doc-changelog-modal");
-    modal.querySelectorAll(".delete-doc-change").forEach((button) => button.addEventListener("click", async () => {
-      try {
-        await deleteInformationDocChange(button.dataset.changeId, docId);
-      } catch (error) {
-        showNotify(error.message, "error");
-      }
-    }));
   });
 }
 

@@ -7842,7 +7842,7 @@ function renderEvidenceLinks(item) {
     const isUploadedImage = /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(link);
     const loading = index < 2 ? "eager" : "lazy";
     const priority = index < 2 ? ' fetchpriority="high"' : "";
-    const imageAttrs = `width="214" height="118" loading="${loading}" decoding="async"${priority} onload="this.closest('.evidence-preview-card')?.classList.add('is-loaded')"`;
+    const imageAttrs = `width="152" height="86" loading="${loading}" decoding="async"${priority} onload="this.closest('.evidence-preview-card')?.classList.add('is-loaded')"`;
     if (isUploadedImage) {
       return `<div class="evidence-preview-card uploaded-preview"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${escapeHtml(link)}" alt="Beweis ${index + 1}" ${imageAttrs}></button><span class="evidence-text-link">Hochgeladenes Bild</span></div>`;
     }

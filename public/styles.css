@@ -2708,13 +2708,13 @@ tr:last-child td {
 }
 
 .seizure-table {
-  min-width: 1260px;
+  min-width: 1460px;
   table-layout: fixed;
 }
 
 .seizure-table th,
 .seizure-table td {
-  padding: 16px;
+  padding: 14px;
   vertical-align: middle;
   line-height: 1.45;
 }
@@ -2733,16 +2733,60 @@ tr:last-child td {
 
 .seizure-table th:nth-child(2),
 .seizure-table td:nth-child(2) {
-  width: 210px;
+  width: 190px;
 }
 
 .seizure-table th:nth-child(3),
 .seizure-table td:nth-child(3) {
-  width: 260px;
+  width: 190px;
+}
+
+.seizure-table th:nth-child(4),
+.seizure-table td:nth-child(4),
+.seizure-table th:nth-child(5),
+.seizure-table td:nth-child(5) {
+  width: 110px;
+}
+
+.seizure-table th:nth-child(6),
+.seizure-table td:nth-child(6) {
+  width: 118px;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.seizure-table th:nth-child(7),
+.seizure-table td:nth-child(7) {
+  width: 145px;
+}
+
+.seizure-table th:nth-child(8),
+.seizure-table td:nth-child(8) {
+  width: 135px;
+}
+
+.seizure-table th:nth-child(9),
+.seizure-table td:nth-child(9) {
+  width: 135px;
+}
+
+.seizure-table th:nth-child(10),
+.seizure-table td:nth-child(10) {
+  width: 155px;
+}
+
+.seizure-table th:nth-child(11),
+.seizure-table td:nth-child(11) {
+  width: 145px;
+}
+
+.seizure-table th:nth-child(12),
+.seizure-table td:nth-child(12) {
+  width: 86px;
 }
 
 .seizure-location-cell {
-  max-width: 210px;
+  max-width: 190px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -2750,7 +2794,7 @@ tr:last-child td {
 
 .evidence-link-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .evidence-link-list > span {
@@ -2765,10 +2809,10 @@ tr:last-child td {
 
 .evidence-preview-card {
   display: grid;
-  gap: 8px;
-  width: 230px;
-  min-width: 230px;
-  padding: 8px;
+  gap: 6px;
+  width: 166px;
+  min-width: 166px;
+  padding: 7px;
   background: #101827;
   border: 1px solid #2d415c;
   border-radius: 8px;
@@ -2777,7 +2821,7 @@ tr:last-child td {
 .evidence-thumb-link {
   display: block;
   width: 100%;
-  height: 118px;
+  height: 86px;
   overflow: hidden;
   background: #0b1220;
   border: 1px solid #30445f;

@@ -7837,7 +7837,8 @@ function renderEvidenceLinks(item) {
     const isUrl = /^https?:\/\//i.test(link);
     const isPrnt = /^https?:\/\/(?:www\.)?prnt\.sc\//i.test(link);
     const isGyazo = /^https?:\/\/(?:www\.)?gyazo\.com\//i.test(link);
-    const previewSrc = isPrnt || isGyazo ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link);
+    const isImgur = /^https?:\/\/(?:www\.)?imgur\.com\/(?:a|gallery)\//i.test(link);
+    const previewSrc = isPrnt || isGyazo || isImgur ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link);
     const isUploadedImage = /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(link);
     const loading = index < 2 ? "eager" : "lazy";
     const priority = index < 2 ? ' fetchpriority="high"' : "";
@@ -7846,7 +7847,7 @@ function renderEvidenceLinks(item) {
       return `<div class="evidence-preview-card uploaded-preview"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${escapeHtml(link)}" alt="Beweis ${index + 1}" ${imageAttrs}></button><span class="evidence-text-link">Hochgeladenes Bild</span></div>`;
     }
     return isUrl
-      ? `<div class="evidence-preview-card ${isPrnt || isGyazo ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${previewSrc}" alt="Beweis ${index + 1}" ${imageAttrs} onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">${isGyazo ? "GYAZO" : isPrnt ? "PRNT.SC" : "VORSCHAU"}</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
+      ? `<div class="evidence-preview-card ${isPrnt || isGyazo || isImgur ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${previewSrc}" alt="Beweis ${index + 1}" ${imageAttrs} onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">${isGyazo ? "GYAZO" : isPrnt ? "PRNT.SC" : isImgur ? "IMGUR" : "VORSCHAU"}</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
       : `<span>${escapeHtml(link)}</span>`;
   }).join("")}</div>`;
 }
@@ -7925,7 +7926,7 @@ function renderSeizures() {
               ${visibleRows.map((item) => `
                 <tr>
                   <td><strong>${escapeHtml(item.suspect || "-")}</strong></td>
-                  <td>${escapeHtml(item.location || "-")}</td>
+                  <td class="seizure-location-cell">${escapeHtml(item.location || "-")}</td>
                   <td>${renderEvidenceLinks(item)}</td>
                   <td>${formatMoney(item.blackMoney)}</td>
                   <td>${Number(item.crates || 0) || "-"}</td>

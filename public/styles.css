@@ -2709,6 +2709,7 @@ tr:last-child td {
 
 .seizure-table {
   min-width: 1260px;
+  table-layout: fixed;
 }
 
 .seizure-table th,
@@ -2720,6 +2721,31 @@ tr:last-child td {
 
 .seizure-table td {
   color: #eef5ff;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.seizure-table th:nth-child(1),
+.seizure-table td:nth-child(1) {
+  width: 150px;
+}
+
+.seizure-table th:nth-child(2),
+.seizure-table td:nth-child(2) {
+  width: 210px;
+}
+
+.seizure-table th:nth-child(3),
+.seizure-table td:nth-child(3) {
+  width: 260px;
+}
+
+.seizure-location-cell {
+  max-width: 210px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .evidence-link-list {

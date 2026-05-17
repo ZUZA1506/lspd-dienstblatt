@@ -11,6 +11,8 @@ const STORAGE_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : 
 const DB_FILE = path.join(STORAGE_DIR, "dienstblatt.json");
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DEFAULT_PASSWORD = "LSPD12345";
+const EVIDENCE_PREVIEW_TTL_MS = 1000 * 60 * 60 * 12;
+const evidencePreviewCache = new Map();
 
 loadEnvFile(path.join(ROOT, ".env"));
 
@@ -948,6 +950,11 @@ app.use(express.static(PUBLIC_DIR, {
 app.get("/api/evidence-preview", (req, res) => {
   const url = String(req.query.url || "");
   if (!/^https:\/\/(?:www\.)?(?:prnt\.sc|gyazo\.com)\//i.test(url)) return res.status(400).end();
+  const cached = evidencePreviewCache.get(url);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.setHeader("Cache-Control", "public, max-age=43200");
+    return res.redirect(302, cached.imageUrl);
+  }
   https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (remote) => {
     let body = "";
     remote.setEncoding("utf8");
@@ -958,7 +965,9 @@ app.get("/api/evidence-preview", (req, res) => {
       const imageUrl = match?.[1] || "";
       if (!/^https?:\/\//i.test(imageUrl) || /st\.prntscr\.com\//i.test(imageUrl)) return res.status(404).end();
       if (/gyazo\.com\//i.test(url) && !/^https:\/\/i\.gyazo\.com\//i.test(imageUrl)) return res.status(404).end();
-      res.redirect(imageUrl);
+      evidencePreviewCache.set(url, { imageUrl, expiresAt: Date.now() + EVIDENCE_PREVIEW_TTL_MS });
+      res.setHeader("Cache-Control", "public, max-age=43200");
+      res.redirect(302, imageUrl);
     });
   }).on("error", () => res.status(404).end());
 });

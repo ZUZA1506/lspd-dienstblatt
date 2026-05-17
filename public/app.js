@@ -6041,15 +6041,18 @@ async function saveInformationDocDirect(doc, title, body, closeAfter = false) {
 
 function openInformationDocCloseConfirm(doc, title, before, after) {
   openModal(`
-    <h3>Änderung speichern?</h3>
-    <p class="muted">Im Dokument wurden Änderungen erkannt.</p>
-    <div class="doc-save-preview-grid">
-      <section>
-        <strong>Vorher</strong>
+    <div class="doc-compare-head">
+      <span class="doc-compare-kicker">Vorschrift speichern</span>
+      <h3>Änderung prüfen</h3>
+      <p>Vergleiche die bisherige und die neue Fassung, bevor du die Änderung ins Dienstblatt übernimmst.</p>
+    </div>
+    <div class="doc-compare-grid">
+      <section class="doc-compare-panel before">
+        <header><span>Vorher</span><small>Aktuell gespeichert</small></header>
         <article class="doc-save-preview before">${formatInformationDocText(before || "")}</article>
       </section>
-      <section>
-        <strong>Nachher</strong>
+      <section class="doc-compare-panel after">
+        <header><span>Nachher</span><small>Neue Fassung</small></header>
         <article class="doc-save-preview after">${formatInformationDocText(after || "")}</article>
       </section>
     </div>
@@ -6060,6 +6063,7 @@ function openInformationDocCloseConfirm(doc, title, before, after) {
       <button class="blue-btn" id="confirmSaveDocChanges">Speichern</button>
     </div>
   `, (confirmModal) => {
+    confirmModal.classList.add("doc-compare-modal");
     confirmModal.querySelector("#backToDocEdit").addEventListener("click", () => openInformationDocView(doc.id, { title, body: after }));
     confirmModal.querySelector("#discardDocChanges").addEventListener("click", closeModal);
     confirmModal.querySelector("#confirmSaveDocChanges").addEventListener("click", async () => {
@@ -6663,7 +6667,11 @@ function openInformationDocChangelog(docId, focusChangeId = "") {
   const canManage = canAccess("actions", "manageInformation", "Direktion");
   const changes = informationDocChangesFor(docId);
   openModal(`
-    <h3>Changelog: ${escapeHtml(doc.title)}</h3>
+    <div class="doc-compare-head">
+      <span class="doc-compare-kicker">Changelog</span>
+      <h3>${escapeHtml(doc.title)}</h3>
+      <p>Alle gespeicherten Änderungen dieser Vorschrift mit direktem Vorher/Nachher-Vergleich.</p>
+    </div>
     <div class="doc-changelog-modal-list">
       ${changes.map((change) => `
         <article class="info-change-row ${change.id === focusChangeId ? "focus-change" : ""}">
@@ -6671,13 +6679,13 @@ function openInformationDocChangelog(docId, focusChangeId = "") {
             <span><strong>${escapeHtml(change.action || "geändert")}</strong><small>${escapeHtml(change.author || "-")} · ${formatDateTime(change.createdAt)}</small></span>
             ${canManage ? `<button class="mini-icon danger delete-doc-change" data-change-id="${escapeHtml(change.id)}" title="Changelog löschen">${actionIcon("delete")}</button>` : ""}
           </div>
-          <div class="doc-change-preview-grid">
-            <section>
-              <strong>Vorher</strong>
+          <div class="doc-compare-grid compact">
+            <section class="doc-compare-panel before">
+              <header><span>Vorher</span><small>Alte Version</small></header>
               <div class="doc-change-preview before">${formatInformationDocText(change.before || "")}</div>
             </section>
-            <section>
-              <strong>Nachher</strong>
+            <section class="doc-compare-panel after">
+              <header><span>Nachher</span><small>Neue Version</small></header>
               <div class="doc-change-preview after">${formatInformationDocText(change.after || "")}</div>
             </section>
           </div>
@@ -6782,6 +6790,7 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       </div>` : ""}
       <aside class="paper-doc-tools">
         <input id="docSearchInput" placeholder="Im Dokument suchen">
+        <small class="doc-search-count" id="docSearchCount">0 Treffer</small>
         ${canEdit ? `<button class="mode-toggle-btn" id="toggleDocMode" type="button">Bearbeitermodus</button><button class="blue-btn hidden" id="saveDocFromEditor" type="button">Speichern</button>` : ""}
         <button class="ghost-btn" id="toggleDocChanges" type="button">Changelog (${changes.length})</button>
       </aside>
@@ -7057,6 +7066,7 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       </div>` : ""}
       <aside class="paper-doc-tools">
         <input id="docSearchInput" placeholder="Im Dokument suchen">
+        <small class="doc-search-count" id="docSearchCount">0 Treffer</small>
         ${canEdit ? `<button class="mode-toggle-btn" id="toggleDocMode" type="button">Bearbeitermodus</button><button class="blue-btn hidden" id="saveDocFromEditor" type="button">Speichern</button>` : ""}
         <button class="ghost-btn" id="toggleDocChanges" type="button">Changelog (${changes.length})</button>
       </aside>
@@ -7152,10 +7162,56 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       clone.addEventListener("click", closeModal);
     }
     let searchIndex = -1;
+    const findEditorMatches = (term) => {
+      const currentEditor = editor();
+      if (!currentEditor || !term) return [];
+      const matches = [];
+      const needle = term.toLowerCase();
+      const walker = document.createTreeWalker(currentEditor, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          return node.nodeValue?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+        }
+      });
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.nodeValue || "";
+        let start = text.toLowerCase().indexOf(needle);
+        while (start >= 0) {
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, start + term.length);
+          matches.push(range);
+          start = text.toLowerCase().indexOf(needle, start + term.length);
+        }
+      }
+      return matches;
+    };
     const updateDocSearch = (term, move = 0) => {
       const page = modal.querySelector("#paperDocPage");
       const counter = modal.querySelector("#docSearchCount");
       if (!page) return;
+      if (editMode) {
+        const matches = findEditorMatches(term);
+        if (!matches.length) {
+          searchIndex = -1;
+          if (counter) counter.textContent = term ? "0 Treffer" : "0 Treffer";
+          return;
+        }
+        if (!move) {
+          searchIndex = -1;
+          if (counter) counter.textContent = `${matches.length} Treffer`;
+          return;
+        }
+        searchIndex = move ? (searchIndex + move + matches.length) % matches.length : 0;
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(matches[searchIndex]);
+        const target = matches[searchIndex].commonAncestorContainer.parentElement || editor();
+        target?.scrollIntoView({ block: "center", behavior: "smooth" });
+        saveDocSelection();
+        if (counter) counter.textContent = `${searchIndex + 1} / ${matches.length} Treffer`;
+        return;
+      }
       page.innerHTML = formatInformationDocText(readBody, term);
       const marks = [...page.querySelectorAll(".doc-search-mark")];
       if (!marks.length) {
@@ -7783,11 +7839,14 @@ function renderEvidenceLinks(item) {
     const isGyazo = /^https?:\/\/(?:www\.)?gyazo\.com\//i.test(link);
     const previewSrc = isPrnt || isGyazo ? `/api/evidence-preview?url=${encodeURIComponent(link)}` : escapeHtml(link);
     const isUploadedImage = /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(link);
+    const loading = index < 2 ? "eager" : "lazy";
+    const priority = index < 2 ? ' fetchpriority="high"' : "";
+    const imageAttrs = `width="214" height="118" loading="${loading}" decoding="async"${priority} onload="this.closest('.evidence-preview-card')?.classList.add('is-loaded')"`;
     if (isUploadedImage) {
-      return `<div class="evidence-preview-card uploaded-preview"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${escapeHtml(link)}" alt="Beweis ${index + 1}" loading="lazy"></button><span class="evidence-text-link">Hochgeladenes Bild</span></div>`;
+      return `<div class="evidence-preview-card uploaded-preview"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${escapeHtml(link)}" alt="Beweis ${index + 1}" ${imageAttrs}></button><span class="evidence-text-link">Hochgeladenes Bild</span></div>`;
     }
     return isUrl
-      ? `<div class="evidence-preview-card ${isPrnt || isGyazo ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${previewSrc}" alt="Beweis ${index + 1}" loading="lazy" onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">${isGyazo ? "GYAZO" : "PRNT.SC"}</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
+      ? `<div class="evidence-preview-card ${isPrnt || isGyazo ? "prnt-preview" : ""}"><button class="evidence-thumb-link evidence-preview-open" type="button" data-link="${escapeHtml(link)}"><img src="${previewSrc}" alt="Beweis ${index + 1}" ${imageAttrs} onerror="this.closest('.evidence-preview-card').classList.add('no-preview')"><span class="prnt-fallback">${isGyazo ? "GYAZO" : isPrnt ? "PRNT.SC" : "VORSCHAU"}</span></button><a class="evidence-text-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></div>`
       : `<span>${escapeHtml(link)}</span>`;
   }).join("")}</div>`;
 }
@@ -8309,8 +8368,8 @@ function setupTableFilter(selector) {
 function openModal(html, onReady) {
   modalRoot.innerHTML = `<div class="modal"><button class="modal-x" type="button" data-close aria-label="Schließen">×</button>${html}</div>`;
   modalRoot.classList.remove("hidden");
-  document.removeEventListener("keydown", handleModalEscape);
-  document.addEventListener("keydown", handleModalEscape);
+  document.removeEventListener("keydown", handleModalEscape, true);
+  document.addEventListener("keydown", handleModalEscape, true);
   modalRoot.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", closeModal));
   onReady?.(modalRoot.querySelector(".modal"));
 }
@@ -8350,7 +8409,7 @@ function closeModal() {
     }
     delete modalRoot.dataset.discardTrainingExamId;
   }
-  document.removeEventListener("keydown", handleModalEscape);
+  document.removeEventListener("keydown", handleModalEscape, true);
   modalRoot.classList.add("hidden");
   modalRoot.innerHTML = "";
 }

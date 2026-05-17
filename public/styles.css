@@ -767,6 +767,7 @@ textarea:focus {
 }
 
 .content {
+  min-width: 0;
   padding: 14px 26px 26px;
   display: grid;
   gap: 16px;
@@ -785,6 +786,8 @@ textarea:focus {
 }
 
 .panel {
+  min-width: 0;
+  max-width: 100%;
   background: #101827;
   border: 1px solid #263850;
   border-radius: 8px;
@@ -2635,8 +2638,16 @@ tr:last-child td {
 }
 
 .seizure-page {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
   gap: 12px;
+}
+
+.seizure-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .seizure-stats-head {
@@ -2702,9 +2713,12 @@ tr:last-child td {
 }
 
 .seizure-table-wrap {
+  width: 100%;
+  max-width: 100%;
   max-height: none;
   overflow-x: auto;
   overflow-y: visible;
+  overscroll-behavior-inline: contain;
 }
 
 .seizure-table {

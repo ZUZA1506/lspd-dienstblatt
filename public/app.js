@@ -7915,7 +7915,7 @@ function renderSeizures() {
                 <th>Kisten</th>
                 <th>Art</th>
                 <th>KFZ / Kennzeichen</th>
-                <th>Officer</th>
+                <th>Zeuge</th>
                 <th>Mord/Totschlag</th>
                 <th>Zeitstempel</th>
                 <th>Erfasst von</th>

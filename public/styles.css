@@ -4308,8 +4308,112 @@ table td.text-left {
   font-size: 13px;
 }
 
-.discord-role-row select[multiple] {
-  min-height: 96px;
+.discord-role-picker {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.discord-role-picker.disabled {
+  padding: 10px;
+  border: 1px dashed #344761;
+  border-radius: 8px;
+}
+
+.discord-role-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 34px;
+  align-items: center;
+}
+
+.discord-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--role-color) 72%, #ffffff 18%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--role-color) 18%, #101827);
+  color: #f8fbff;
+  font-size: 12px;
+}
+
+.discord-role-chip b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discord-role-remove {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  color: #ffffff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.discord-role-empty {
+  color: #7488a8;
+  font-size: 12px;
+}
+
+.discord-role-search {
+  width: 100%;
+}
+
+.discord-role-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #344761;
+  border-radius: 8px;
+  background: #0d1422;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .42);
+}
+
+.discord-role-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #dceaff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.discord-role-option span {
+  color: var(--role-color);
+  font-weight: 900;
+}
+
+.discord-role-option small {
+  color: #7f91ad;
+}
+
+.discord-role-option:hover,
+.discord-role-option.selected {
+  border-color: color-mix(in srgb, var(--role-color) 52%, #ffffff 16%);
+  background: color-mix(in srgb, var(--role-color) 14%, #111827);
 }
 
 .discord-import-status {

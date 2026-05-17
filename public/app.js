@@ -2369,18 +2369,44 @@ function renderITDepartmentPositionsPanel() {
   `;
 }
 
-function discordRoleOptions(selectedRoleIds = []) {
-  const roles = state.settings?.discordSync?.importedRoles || [];
-  const selected = new Set(Array.isArray(selectedRoleIds) ? selectedRoleIds.map(String) : String(selectedRoleIds || "").split(",").map((item) => item.trim()));
-  return roles.map((role) => `<option value="${escapeHtml(role.id)}" ${selected.has(String(role.id)) ? "selected" : ""}>${escapeHtml(role.name)}</option>`).join("");
+function discordRoleColor(role) {
+  const color = Number(role?.color || 0);
+  return color ? `#${color.toString(16).padStart(6, "0")}` : "#99aab5";
 }
 
-function renderDiscordRoleSelect(attribute, key, selectedRoleIds) {
+function discordSelectedRoleIds(selectedRoleIds = []) {
+  const ids = Array.isArray(selectedRoleIds) ? selectedRoleIds : String(selectedRoleIds || "").split(",");
+  return [...new Set(ids.map((roleId) => String(roleId || "").trim()).filter(Boolean))];
+}
+
+function renderDiscordRolePicker(attribute, key, selectedRoleIds) {
   const roles = state.settings?.discordSync?.importedRoles || [];
+  const selected = discordSelectedRoleIds(selectedRoleIds);
   if (!roles.length) {
-    return `<select ${attribute}="${escapeHtml(key)}" multiple disabled><option>Bitte zuerst Server-Rollen importieren</option></select>`;
+    return `<div class="discord-role-picker disabled" ${attribute}="${escapeHtml(key)}" data-selected=""><span class="muted">Bitte zuerst Server-Rollen importieren.</span></div>`;
   }
-  return `<select ${attribute}="${escapeHtml(key)}" multiple>${discordRoleOptions(selectedRoleIds)}</select>`;
+  const selectedRoles = selected.map((roleId) => roles.find((role) => String(role.id) === String(roleId))).filter(Boolean);
+  return `
+    <div class="discord-role-picker" ${attribute}="${escapeHtml(key)}" data-selected="${escapeHtml(selected.join(","))}">
+      <div class="discord-role-chip-list">
+        ${selectedRoles.map((role) => `
+          <span class="discord-role-chip" style="--role-color:${discordRoleColor(role)}" data-role-id="${escapeHtml(role.id)}">
+            <b>@${escapeHtml(role.name)}</b>
+            <button type="button" class="discord-role-remove" data-role-id="${escapeHtml(role.id)}">×</button>
+          </span>
+        `).join("") || `<span class="discord-role-empty">Keine Rolle ausgewählt</span>`}
+      </div>
+      <input class="discord-role-search" type="text" autocomplete="off" placeholder="@rolle suchen">
+      <div class="discord-role-menu hidden">
+        ${roles.map((role) => `
+          <button type="button" class="discord-role-option ${selected.includes(String(role.id)) ? "selected" : ""}" data-role-id="${escapeHtml(role.id)}" data-role-name="${escapeHtml(role.name.toLowerCase())}" style="--role-color:${discordRoleColor(role)}">
+            <span>@${escapeHtml(role.name)}</span>
+            <small>${role.managed ? "verwaltet" : `Position ${escapeHtml(role.position)}`}</small>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
 }
 
 function renderDiscordSyncPanel() {
@@ -2421,10 +2447,10 @@ function renderDiscordSyncPanel() {
           <div><strong>Ränge</strong><small>Jeder Dienstblatt-Rang kann mehrere Discord-Rollen bekommen.</small></div>
           <div class="discord-role-grid">
             ${sortedRanks.map((rank) => `
-              <label class="discord-role-row">
+              <div class="discord-role-row">
                 <span>${escapeHtml(rankOptionLabel(rank))}</span>
-                ${renderDiscordRoleSelect("data-discord-rank-role", rank.value, rankRoles[String(rank.value)] || [])}
-              </label>
+                ${renderDiscordRolePicker("data-discord-rank-role", rank.value, rankRoles[String(rank.value)] || [])}
+              </div>
             `).join("")}
           </div>
         </div>
@@ -2438,10 +2464,10 @@ function renderDiscordSyncPanel() {
                   ${departmentPositionsFor(department).map((position) => {
                     const key = `${department.id}:${position}`;
                     return `
-                      <label class="discord-role-row">
+                      <div class="discord-role-row">
                         <span>${escapeHtml(position)}</span>
-                        ${renderDiscordRoleSelect("data-discord-dept-role", key, departmentRoles[key] || [])}
-                      </label>
+                        ${renderDiscordRolePicker("data-discord-dept-role", key, departmentRoles[key] || [])}
+                      </div>
                     `;
                   }).join("")}
                 </div>
@@ -2621,6 +2647,7 @@ function renderIT() {
   $("#testDiscordSync")?.addEventListener("click", testDiscordSync);
   $("#runDiscordSync")?.addEventListener("click", runDiscordSync);
   $("#linkOwnDiscord")?.addEventListener("click", () => startDiscordOAuth("link"));
+  setupDiscordRolePickers();
   document.querySelectorAll(".it-edit-member").forEach((button) => button.addEventListener("click", () => openUserModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".reset-member-password").forEach((button) => button.addEventListener("click", () => openResetPasswordModal(state.users.find((user) => user.id === button.dataset.userId))));
   document.querySelectorAll(".page-permission-open").forEach((button) => button.addEventListener("click", () => openPagePermissionModal(button.dataset.pageKey)));
@@ -2694,6 +2721,74 @@ async function saveRestartTimes(times) {
   renderIT();
 }
 
+function updateDiscordRolePicker(picker) {
+  const roles = state.settings?.discordSync?.importedRoles || [];
+  const selected = discordSelectedRoleIds(picker.dataset.selected || "");
+  const chipList = picker.querySelector(".discord-role-chip-list");
+  if (chipList) {
+    chipList.innerHTML = selected.map((roleId) => roles.find((role) => String(role.id) === String(roleId))).filter(Boolean).map((role) => `
+      <span class="discord-role-chip" style="--role-color:${discordRoleColor(role)}" data-role-id="${escapeHtml(role.id)}">
+        <b>@${escapeHtml(role.name)}</b>
+        <button type="button" class="discord-role-remove" data-role-id="${escapeHtml(role.id)}">×</button>
+      </span>
+    `).join("") || `<span class="discord-role-empty">Keine Rolle ausgewählt</span>`;
+  }
+  picker.querySelectorAll(".discord-role-option").forEach((option) => {
+    option.classList.toggle("selected", selected.includes(String(option.dataset.roleId)));
+  });
+}
+
+function filterDiscordRolePicker(picker) {
+  const query = (picker.querySelector(".discord-role-search")?.value || "").replace(/^@/, "").trim().toLowerCase();
+  picker.querySelectorAll(".discord-role-option").forEach((option) => {
+    const match = !query || (option.dataset.roleName || "").includes(query);
+    option.classList.toggle("hidden", !match);
+  });
+}
+
+function setupDiscordRolePickers() {
+  document.querySelectorAll(".discord-role-picker:not(.disabled)").forEach((picker) => {
+    const input = picker.querySelector(".discord-role-search");
+    const menu = picker.querySelector(".discord-role-menu");
+    input?.addEventListener("focus", () => {
+      menu?.classList.remove("hidden");
+      filterDiscordRolePicker(picker);
+    });
+    input?.addEventListener("input", () => {
+      menu?.classList.remove("hidden");
+      filterDiscordRolePicker(picker);
+    });
+    picker.querySelectorAll(".discord-role-option").forEach((option) => {
+      option.addEventListener("click", () => {
+        const selected = discordSelectedRoleIds(picker.dataset.selected || "");
+        const roleId = String(option.dataset.roleId || "");
+        if (roleId && !selected.includes(roleId)) selected.push(roleId);
+        picker.dataset.selected = selected.join(",");
+        if (input) input.value = "";
+        updateDiscordRolePicker(picker);
+        filterDiscordRolePicker(picker);
+        input?.focus();
+      });
+    });
+    picker.addEventListener("click", (event) => {
+      const remove = event.target.closest(".discord-role-remove");
+      if (!remove) return;
+      const selected = discordSelectedRoleIds(picker.dataset.selected || "").filter((roleId) => roleId !== String(remove.dataset.roleId || ""));
+      picker.dataset.selected = selected.join(",");
+      updateDiscordRolePicker(picker);
+      filterDiscordRolePicker(picker);
+    });
+  });
+  if (!window.discordRolePickerOutsideCloseInstalled) {
+    window.discordRolePickerOutsideCloseInstalled = true;
+    document.addEventListener("click", (event) => {
+      document.querySelectorAll(".discord-role-picker .discord-role-menu").forEach((menu) => {
+        if (!menu.closest(".discord-role-picker")?.contains(event.target)) menu.classList.add("hidden");
+      });
+    });
+  }
+}
+
 async function saveDefaultPassword() {
   const input = $("#defaultCredentialValue");
   const message = $("#defaultCredentialMessage");
@@ -2726,14 +2821,14 @@ async function saveDiscordSyncSettings(options = {}) {
   const rethrow = Boolean(options.rethrow);
   const message = $("#discordSyncMessage");
   const rankRoles = {};
-  document.querySelectorAll("[data-discord-rank-role]").forEach((select) => {
-    const roleIds = Array.from(select.selectedOptions || []).map((option) => option.value.trim()).filter(Boolean);
-    if (roleIds.length) rankRoles[select.dataset.discordRankRole] = roleIds;
+  document.querySelectorAll("[data-discord-rank-role]").forEach((picker) => {
+    const roleIds = discordSelectedRoleIds(picker.dataset.selected || "");
+    if (roleIds.length) rankRoles[picker.dataset.discordRankRole] = roleIds;
   });
   const departmentRoles = {};
-  document.querySelectorAll("[data-discord-dept-role]").forEach((select) => {
-    const roleIds = Array.from(select.selectedOptions || []).map((option) => option.value.trim()).filter(Boolean);
-    if (roleIds.length) departmentRoles[select.dataset.discordDeptRole] = roleIds;
+  document.querySelectorAll("[data-discord-dept-role]").forEach((picker) => {
+    const roleIds = discordSelectedRoleIds(picker.dataset.selected || "");
+    if (roleIds.length) departmentRoles[picker.dataset.discordDeptRole] = roleIds;
   });
   const discordSync = {
     enabled: $("#discordSyncEnabled")?.checked || false,

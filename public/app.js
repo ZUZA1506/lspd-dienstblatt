@@ -6921,7 +6921,7 @@ function informationTextToHtml(text = "") {
     }
     if (trimmed.startsWith("# ")) {
       closeList();
-      html.push(`<section class="doc-section-card"><h2>${inline(trimmed.slice(2))}</h2>`);
+      html.push(`<h2>${inline(trimmed.slice(2))}</h2>`);
       return;
     }
     if (trimmed.startsWith("### ")) {
@@ -6986,7 +6986,7 @@ function informationTextToHtml(text = "") {
     html.push(`<p>${inline(trimmed)}</p>`);
   });
   closeList();
-  return sanitizeInformationHtml(html.join("").replace(/<section class="doc-section-card">/g, '</section><section class="doc-section-card">').replace(/^<\/section>/, "") + (html.some((entry) => entry.startsWith('<section class="doc-section-card">')) ? "</section>" : ""));
+  return sanitizeInformationHtml(html.join(""));
 }
 
 function formatInformationDocText(text = "", searchTerm = "") {
@@ -7005,39 +7005,52 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       <div class="doc-read-mode" id="docReadMode">
         <article class="paper-doc-page" id="paperDocPage">${formatInformationDocText(readBody)}</article>
       </div>
-      ${canEdit ? `<div class="doc-edit-mode hidden" id="docEditMode">
-        <input id="paperDocTitle" value="${escapeHtml(draft?.title ?? doc.title)}" aria-label="Dokumenttitel">
-        <div class="docs-editor-toolbar" aria-label="Dokumentformatierung">
-          <div class="docs-toolbar-row">
-            <select id="docBlockStyle" title="Formatvorlage">
-              <option value="P">Normaler Text</option>
-              <option value="H2">Titel</option>
-              <option value="H3">Überschrift</option>
-              <option value="H4">Unterüberschrift</option>
-            </select>
-            <select id="docFontSize" title="Textgröße">
-              <option value="">Textgröße</option>
-              <option value="2">Klein</option>
-              <option value="3">Normal</option>
-              <option value="4">Groß</option>
-              <option value="5">Sehr groß</option>
-            </select>
-            <label class="docs-color-menu" title="Textfarbe"><span>A</span><input id="docTextColor" type="color" value="#dce8f8"></label>
-            <label class="docs-color-menu" title="Markierung"><span>▰</span><input id="docHighlightColor" type="color" value="#1f4f9b"></label>
-            <span class="docs-toolbar-separator"></span>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="bold" title="Fett"><strong>B</strong></button>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="italic" title="Kursiv"><em>I</em></button>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="underline" title="Unterstrichen"><u>U</u></button>
-            <span class="docs-toolbar-separator"></span>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="justifyLeft" title="Linksbündig">☰</button>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="justifyCenter" title="Zentriert">≡</button>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="justifyRight" title="Rechtsbündig">☷</button>
-            <span class="docs-toolbar-separator"></span>
-            <button type="button" class="docs-tool-btn wide" data-wysiwyg="insertUnorderedList" title="Aufzählung">• Liste</button>
-            <button type="button" class="docs-tool-btn wide" data-wysiwyg="insertOrderedList" title="Nummerierung">1. Liste</button>
-            <button type="button" class="docs-tool-btn wide" data-wysiwyg="createLink" title="Link einfügen">Link</button>
-            <button type="button" class="docs-tool-btn wide" id="autoFormatDoc" title="Vorschriften automatisch formatieren">Auto-Format</button>
-            <button type="button" class="docs-tool-btn" data-wysiwyg="removeFormat" title="Formatierung entfernen">Tx</button>
+      ${canEdit ? `<div class="doc-edit-mode hidden information-editor-workspace" id="docEditMode">
+        <div class="information-editor-sticky">
+          <input id="paperDocTitle" value="${escapeHtml(draft?.title ?? doc.title)}" aria-label="Dokumenttitel">
+          <div class="docs-editor-toolbar" aria-label="Dokumentformatierung">
+            <div class="docs-toolbar-group">
+              <span class="docs-toolbar-label">Text</span>
+              <select id="docBlockStyle" title="Formatvorlage">
+                <option value="P">Normaler Text</option>
+                <option value="H2">Titel</option>
+                <option value="H3">Überschrift</option>
+                <option value="H4">Unterüberschrift</option>
+              </select>
+              <select id="docFontSize" title="Textgröße">
+                <option value="">Textgröße</option>
+                <option value="2">Klein</option>
+                <option value="3">Normal</option>
+                <option value="4">Groß</option>
+                <option value="5">Sehr groß</option>
+              </select>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="bold" title="Fett (Strg+B)"><strong>B</strong></button>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="italic" title="Kursiv"><em>I</em></button>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="underline" title="Unterstrichen"><u>U</u></button>
+            </div>
+            <div class="docs-toolbar-group">
+              <span class="docs-toolbar-label">Farbe</span>
+              <label class="docs-color-menu" title="Textfarbe"><span>A</span><input id="docTextColor" type="color" value="#dce8f8"></label>
+              <label class="docs-color-menu" title="Markierung"><span>▰</span><input id="docHighlightColor" type="color" value="#1f4f9b"></label>
+            </div>
+            <div class="docs-toolbar-group">
+              <span class="docs-toolbar-label">Absatz</span>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="justifyLeft" title="Linksbündig">☰</button>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="justifyCenter" title="Zentriert">≡</button>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="justifyRight" title="Rechtsbündig">☷</button>
+              <button type="button" class="docs-tool-btn wide" data-wysiwyg="insertUnorderedList" title="Aufzählung">• Liste</button>
+              <button type="button" class="docs-tool-btn wide" data-wysiwyg="insertOrderedList" title="Nummerierung">1. Liste</button>
+            </div>
+            <div class="docs-toolbar-group">
+              <span class="docs-toolbar-label">Einfügen</span>
+              <button type="button" class="docs-tool-btn wide accent" data-insert-card="info" title="Eigene Kachel einfügen">Kachel</button>
+              <button type="button" class="docs-tool-btn wide" data-insert-card="warning" title="Warn-Kachel einfügen">Warnung</button>
+              <button type="button" class="docs-tool-btn wide" data-wysiwyg="createLink" title="Link einfügen">Link</button>
+            </div>
+            <div class="docs-toolbar-group compact">
+              <button type="button" class="docs-tool-btn wide" id="autoFormatDoc" title="Vorschriften automatisch formatieren">Auto-Format</button>
+              <button type="button" class="docs-tool-btn" data-wysiwyg="removeFormat" title="Formatierung entfernen">Tx</button>
+            </div>
           </div>
         </div>
         <article class="paper-doc-page paper-doc-editor wysiwyg-editor" id="paperDocEditor" contenteditable="true" spellcheck="true">${editorHtml}</article>
@@ -7095,6 +7108,22 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
         return;
       }
       document.execCommand(command, false, value || null);
+    };
+    const insertDocCard = (type = "info") => {
+      const currentEditor = editor();
+      if (!currentEditor) return;
+      const warning = type === "warning";
+      restoreDocSelection();
+      const cardHtml = `
+        <section class="doc-section-card ${warning ? "warning" : ""}">
+          <h2>${warning ? "Wichtiger Hinweis" : "Neue Kachel"}</h2>
+          <p>${warning ? "Hinweis eintragen..." : "Inhalt eintragen..."}</p>
+        </section>
+        <p><br></p>
+      `;
+      document.execCommand("insertHTML", false, cardHtml);
+      currentEditor.focus();
+      saveDocSelection();
     };
     const applyAutoFormat = () => {
       const currentEditor = editor();
@@ -7154,6 +7183,10 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       button.addEventListener("mousedown", (event) => event.preventDefault());
       button.addEventListener("click", () => runCommand(button.dataset.wysiwyg));
     });
+    modal.querySelectorAll("[data-insert-card]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => insertDocCard(button.dataset.insertCard));
+    });
     modal.querySelector("#docBlockStyle")?.addEventListener("change", (event) => runCommand(`formatBlock:${event.target.value}`));
     modal.querySelector("#docFontSize")?.addEventListener("change", (event) => {
       if (event.target.value) runCommand(`fontSize:${event.target.value}`);
@@ -7168,6 +7201,12 @@ function openInformationDocView(docId, draft = null, focusChangeId = "") {
       if (!plain || !/(^#\s|^§\d|━{5,}|^- |\n#\s|\n§\d|\n- )/m.test(plain)) return;
       event.preventDefault();
       document.execCommand("insertHTML", false, informationTextToHtml(plain));
+    });
+    editor()?.addEventListener("keydown", (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "b") return;
+      event.preventDefault();
+      document.execCommand("bold", false, null);
+      saveDocSelection();
     });
     editor()?.addEventListener("keyup", saveDocSelection);
     editor()?.addEventListener("mouseup", saveDocSelection);

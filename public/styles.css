@@ -5441,16 +5441,18 @@ table td.text-left {
   gap: 8px;
   align-content: center;
   padding: 14px;
-  border: 1px solid #30445f;
+  border: 1px solid rgba(79, 112, 153, .82);
   border-radius: 8px;
   color: #f5f8ff;
-  background: #142033;
+  background: linear-gradient(145deg, #17253a 0%, #101a2b 100%);
+  box-shadow: inset 4px 0 0 rgba(47, 109, 246, .74), 0 12px 28px rgba(0, 0, 0, .22);
   text-align: left;
 }
 
 .internal-doc-tile:hover {
   border-color: #2f6df6;
   background: rgba(47, 109, 246, .14);
+  box-shadow: inset 4px 0 0 #67a5ff, 0 16px 34px rgba(0, 0, 0, .3);
 }
 
 .info-change-list,
@@ -5718,22 +5720,48 @@ table td.text-left {
 }
 
 .doc-section-card {
+  position: relative;
   display: block;
-  margin: 0 0 24px;
-  padding: 22px;
-  border: 1px solid rgba(142, 184, 232, .22);
+  margin: 0 0 28px;
+  padding: 24px 26px 22px;
+  border: 1px solid rgba(121, 161, 211, .32);
   border-radius: 8px;
-  background: rgba(20, 32, 51, .62);
+  background: linear-gradient(145deg, rgba(24, 39, 61, .94), rgba(13, 23, 39, .96));
+  box-shadow: inset 5px 0 0 rgba(47, 109, 246, .72), 0 18px 42px rgba(0, 0, 0, .26);
 }
 
 .doc-section-card.warning {
-  border-color: rgba(255, 190, 92, .38);
-  background: rgba(91, 58, 12, .22);
+  border-color: rgba(255, 190, 92, .5);
+  background: linear-gradient(145deg, rgba(91, 58, 12, .38), rgba(32, 24, 18, .95));
+  box-shadow: inset 5px 0 0 rgba(255, 190, 92, .82), 0 18px 42px rgba(0, 0, 0, .26);
 }
 
 .doc-section-card h2 {
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(142, 184, 232, .18);
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid rgba(142, 184, 232, .22);
+  border-radius: 6px;
+  color: #f8fbff;
+  background: rgba(47, 109, 246, .16);
+}
+
+.paper-doc-page > h2,
+.paper-doc-page > h3,
+.paper-doc-page > h4,
+.wysiwyg-editor > h2,
+.wysiwyg-editor > h3,
+.wysiwyg-editor > h4 {
+  margin: 26px 0 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(121, 161, 211, .3);
+  border-left: 5px solid rgba(47, 109, 246, .72);
+  border-radius: 8px;
+  color: #f8fbff;
+  background: linear-gradient(145deg, rgba(24, 39, 61, .9), rgba(13, 23, 39, .88));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .18);
 }
 
 .doc-section-divider {
